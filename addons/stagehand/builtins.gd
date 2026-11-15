@@ -15,19 +15,24 @@ func install(names: PackedStringArray) -> void:
 		bridge.register_object(
 			self,
 			"Runtime",
-			"builtin",
+			"Runtime",
 			{ "info": runtime_info },
 			runtime_observation,
 		)
 
 	if "SceneTree" in names:
-		bridge.register_object(self, "SceneTree", "builtin", { "current": current, "query": query })
+		bridge.register_object(
+			self,
+			"SceneTree",
+			"SceneTree",
+			{ "current": current, "query": query },
+		)
 
 	if "Object" in names:
 		bridge.register_object(
 			self,
 			"Object",
-			"builtin",
+			"Object",
 			{
 				"inspect": inspect_object,
 				"get": get_property,
@@ -40,7 +45,7 @@ func install(names: PackedStringArray) -> void:
 		bridge.register_object(
 			self,
 			"Screen",
-			"builtin",
+			"Screen",
 			{ "viewports": viewports, "dimensions": dimensions, "capture": capture },
 		)
 

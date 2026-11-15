@@ -239,7 +239,7 @@ export class ScreenObject extends RemoteObject {
   }
 }
 
-const builtinWrappers = {
+const defaultWrappers = {
   Input: (remote) => new InputObject(remote),
   Screen: (remote) => new ScreenObject(remote),
 };
@@ -264,7 +264,7 @@ export class StagehandClient extends EventEmitter {
   constructor(socket, { wrappers = {} } = {}) {
     super();
     this.#socket = socket;
-    this.wrappers = { ...builtinWrappers, ...wrappers };
+    this.wrappers = { ...defaultWrappers, ...wrappers };
     socket.addEventListener('message', ({ data }) => {
       const message = JSON.parse(data);
       for (const item of Array.isArray(message) ? message : [message]) {
@@ -397,9 +397,7 @@ export class StagehandClient extends EventEmitter {
 
   #rememberObjects(descriptors) {
     for (const descriptor of descriptors) {
-      const type = descriptor.kind === 'builtin' ? descriptor.label : descriptor.kind;
-      this.#types.set(descriptor.id, type);
-      if (descriptor.kind === 'builtin') this.#builtins.set(descriptor.label, descriptor.id);
+      this.#types.set(descriptor.id, descriptor.kind);
     }
   }
 
@@ -432,17 +430,24 @@ export class StagehandClient extends EventEmitter {
     return wrapped;
   }
 
+  async #findDescriptor(label) {
+    return (await this.objects()).find((object) => object.label === label);
+  }
+
   async findObject(label) {
-    const descriptor = (await this.objects()).find((object) => object.label === label);
+    const descriptor = await this.#findDescriptor(label);
 
     return descriptor ? this.object(descriptor.id) : null;
   }
 
   async builtin(label) {
-    if (!this.#builtins.has(label)) await this.objects();
-
     if (!this.#builtins.has(label)) {
-      throw new Error(`Builtin is unavailable: ${label}`);
+      const descriptor = await this.#findDescriptor(label);
+      if (!descriptor) {
+        throw new Error(`Builtin is unavailable: ${label}`);
+      }
+
+      this.#builtins.set(label, descriptor.id);
     }
 
     return this.object(this.#builtins.get(label));

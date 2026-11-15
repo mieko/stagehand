@@ -1,6 +1,6 @@
 import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { connect, RemoteObject } from '../client.mjs';
+import { connect, InputObject, RemoteObject, ScreenObject } from '../client.mjs';
 import { launchFixture } from './fixture.mjs';
 
 let fixture;
@@ -25,6 +25,73 @@ class Dingus {
     return this.remote.invoke('echo', { value });
   }
 }
+
+test('standard endpoints use their registered kinds through ordinary discovery and references', async () => {
+  const game = await connect(fixture.url, { token: fixture.token });
+
+  try {
+    const descriptors = await game.objects();
+    for (const label of ['Runtime', 'SceneTree', 'Object', 'Screen', 'Input']) {
+      assert.equal(descriptors.find((object) => object.label === label).kind, label);
+    }
+
+    const input = await game.findObject('Input');
+    const screen = await game.findObject('Screen');
+    assert.ok(input instanceof InputObject);
+    assert.ok(screen instanceof ScreenObject);
+    assert.equal(input.id, (await game.builtin('Input')).id);
+
+    const probe = await game.findObject('A');
+    const returned = await probe.invoke('echo', { value: { input } });
+    assert.ok(returned.input instanceof InputObject);
+    assert.equal(returned.input.id, input.id);
+  } finally {
+    game.close();
+  }
+});
+
+test('required named lookup caches ordinary handles and refreshes after removal or a miss', async () => {
+  const game = await connect(fixture.url, {
+    token: fixture.token,
+    wrappers: { Dingus: (remote) => ({ name: () => remote.get('name') }) },
+  });
+  let bridge;
+  const handles = [];
+
+  try {
+    const tree = await game.builtin('SceneTree');
+    const scene = (await tree.invoke('current')).scene;
+    bridge = (await tree.invoke('query', { name: 'Stagehand' })).nodes[0].node;
+    handles.push(await bridge.call('register_object', scene, 'Named fixture', 'Dingus'));
+    handles.push(await bridge.call('register_object', bridge, 'Named fixture', 'Dingus'));
+
+    let discoveries = 0;
+    const objects = game.objects.bind(game);
+    game.objects = () => {
+      discoveries += 1;
+      return objects();
+    };
+
+    const first = await game.builtin('Named fixture');
+    assert.equal(await first.name(), 'Fixture');
+    assert.equal(await (await game.builtin('Named fixture')).name(), 'Fixture');
+    assert.equal(discoveries, 1);
+
+    await bridge.call('unregister_object', handles.shift());
+    assert.equal(await (await game.builtin('Named fixture')).name(), 'Stagehand');
+    assert.equal(discoveries, 2);
+
+    await bridge.call('unregister_object', handles.shift());
+    await assert.rejects(game.builtin('Named fixture'), /Builtin is unavailable: Named fixture/);
+    assert.equal(await game.findObject('Named fixture'), null);
+
+    handles.push(await bridge.call('register_object', scene, 'Named fixture', 'Dingus'));
+    assert.equal(await (await game.builtin('Named fixture')).name(), 'Fixture');
+  } finally {
+    for (const handle of handles) await bridge.call('unregister_object', handle);
+    game.close();
+  }
+});
 
 test('factory objects wrap discovery, nested results, observations and event arguments', async () => {
   const game = await connect(fixture.url, {

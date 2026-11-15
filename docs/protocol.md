@@ -58,8 +58,9 @@ their published value.
 
 ## Optional builtin operations
 
-Each builtin is a registered object of kind `builtin`, invoked through the same
-`object.call` method. A game may enable any subset or none.
+Builtins are ordinary registered objects, with their names as both label and kind
+(`Input`, `Screen`, etc.), invoked through the same `object.call` method. A game
+may enable any subset or none.
 
 | Label | Operations and parameters |
 | --- | --- |
@@ -84,9 +85,9 @@ disabled. Reflected calls still intentionally have the game's normal authority.
 - JSON primitives, arrays, and ordinary string-key dictionaries remain JSON.
 - `{"$ref":"opaque-instance-scoped-handle","$type":"Dingus"}` follows a live
   Godot object and supplies its client wrapper type. Registered objects use their
-  `kind`; builtins use their names (`Input`, `Screen`, etc.); unregistered objects
-  use `object`. Clients can send just `{"$ref":"handle"}` back: the server resolves
-  the handle and does not trust client-supplied type information.
+  `kind`; unregistered objects use `object`. Clients can send just `{"$ref":"handle"}`
+  back: the server resolves the handle and does not trust client-supplied type
+  information.
 - `{"$godot":"i:9223372036854775807"}` preserves a signed 64-bit integer;
   JS receives BigInt. Unsafe numbers must be sent as BigInt, not rounded JS numbers.
 - `{"$godot":"f:inf"}`, `f:-inf`, `f:nan` preserve scalar nonfinite floats.

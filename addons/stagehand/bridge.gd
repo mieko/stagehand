@@ -142,9 +142,7 @@ func reference(target: Object) -> String:
 
 
 func reference_type(handle: String) -> String:
-	var entry: Dictionary = _objects[handle]
-
-	return entry.label if entry.kind == "builtin" else entry.kind
+	return _objects[handle].kind
 
 
 func resolve_object(handle: Variant) -> Variant:

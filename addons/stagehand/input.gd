@@ -25,7 +25,7 @@ func _ready() -> void:
 	handle = bridge.register_object(
 		self,
 		"Input",
-		"builtin",
+		"Input",
 		{
 			"actions": actions,
 			"press": press,

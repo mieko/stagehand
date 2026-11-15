@@ -12,6 +12,12 @@ support; see the [wire protocol](../docs/protocol.md) for message and value form
 the first matching object, or `null` if none matches. Use `game.objects()` for
 descriptors and `game.object(id)` when you already have a specific handle.
 
+`await game.builtin(label)` uses the same first-match lookup, caches the handle
+until the object is removed or the connection closes, and throws if it is absent.
+It's a convenience for required named endpoints, including ordinary game-owned
+registrations. Builtins use their names as both label and kind; for example,
+`findObject('Input')` and `builtin('Input')` both use the default `Input` wrapper.
+
 `connect(url, { token })` accepts a local or remote WebSocket URL. The game listener
 defaults to loopback; remote use requires an explicit game-side bind address. Use
 `ws://game-host:PORT` on a trusted network or through an encrypted tunnel, or
