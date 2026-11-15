@@ -1,0 +1,21 @@
+config_version=5
+
+[application]
+config/name="Stagehand Fixture"
+run/flush_stdout_on_print=true
+config/use_custom_user_dir=true
+config/custom_user_dir_name="stagehand-fixture"
+run/main_scene="res://fixture.tscn"
+
+[display]
+window/size/viewport_width=320
+window/size/viewport_height=240
+window/size/window_width_override=320
+window/size/window_height_override=240
+window/size/no_focus=true
+window/size/initial_position_type=0
+window/size/initial_position=Vector2i(30000, 30000)
+
+[rendering]
+renderer/rendering_method="gl_compatibility"
+environment/defaults/default_clear_color=Color(0.1, 0.2, 0.3, 1)

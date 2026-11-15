@@ -1,0 +1,12 @@
+{
+  "name": "godot-stagehand",
+  "private": true,
+  "type": "module",
+  "exports": "./client/client.mjs",
+  "engines": {
+    "node": ">=22"
+  },
+  "scripts": {
+    "test": "node --test --test-concurrency=1 client/test/*.test.mjs"
+  }
+}

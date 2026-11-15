@@ -1,0 +1,242 @@
+extends RefCounted
+## Object references stay live handles; native value types use Godot's JSON codec.
+
+var bridge: Node
+const Failure = preload("failure.gd")
+const COMPONENTS := {
+	"Vector2": 2,
+	"Vector2i": 2,
+	"Vector3": 3,
+	"Vector3i": 3,
+	"Vector4": 4,
+	"Vector4i": 4,
+	"Rect2": 4,
+	"Rect2i": 4,
+	"Plane": 4,
+	"Quaternion": 4,
+	"Color": 4,
+	"Transform2D": 6,
+	"AABB": 6,
+	"Basis": 9,
+	"Transform3D": 12,
+	"Projection": 16,
+}
+
+const PACKED := {
+	"PackedByteArray": 1,
+	"PackedInt32Array": 1,
+	"PackedInt64Array": 1,
+	"PackedFloat32Array": 1,
+	"PackedFloat64Array": 1,
+	"PackedStringArray": 1,
+	"PackedVector2Array": 2,
+	"PackedVector3Array": 3,
+	"PackedVector4Array": 4,
+	"PackedColorArray": 4,
+}
+
+
+func _init(owner: Node) -> void:
+	bridge = owner
+
+
+func encode(value: Variant, depth: int = 0) -> Variant:
+	if depth > 16:
+		return bridge.fail(-32010, "Value exceeds the maximum nesting depth")
+
+	match typeof(value):
+		TYPE_NIL, TYPE_BOOL, TYPE_STRING:
+			return value
+		TYPE_INT:
+			return (
+				value
+				if value >= -9007199254740991 and value <= 9007199254740991
+				else { "$godot": JSON.from_native(value) }
+			)
+		TYPE_FLOAT:
+			if is_finite(value):
+				return value
+
+			return { "$godot": "f:nan" if is_nan(value) else ("f:inf" if value > 0 else "f:-inf") }
+		TYPE_STRING_NAME, TYPE_NODE_PATH:
+			return { "$godot": JSON.from_native(value) }
+		TYPE_OBJECT:
+			if not is_instance_valid(value):
+				return null
+
+			var handle: String = bridge.reference(value)
+
+			return { "$ref": handle, "$type": bridge.reference_type(handle) }
+		TYPE_ARRAY, TYPE_DICTIONARY:
+			if value.size() > 1024:
+				return bridge.fail(
+					-32010,
+					"Collection exceeds 1024 entries; request a smaller view",
+				)
+
+			if value is Array:
+				var items: Array = []
+				for item: Variant in value:
+					var encoded: Variant = encode(item, depth + 1)
+					if encoded is Failure:
+						return encoded
+
+					items.append(encoded)
+
+				return items
+
+			var result: Dictionary = { }
+			for key: Variant in value:
+				if not key is String or key in ["$ref", "$godot", "$dictionary"]:
+					return _encode_dictionary(value, depth)
+
+				var encoded: Variant = encode(value[key], depth + 1)
+				if encoded is Failure:
+					return encoded
+
+				result[key] = encoded
+
+			return result
+		TYPE_CALLABLE, TYPE_SIGNAL, TYPE_RID:
+			return bridge.fail(
+				-32010,
+				"Value type is not transferable: " + type_string(typeof(value)),
+			)
+		_:
+			var native: Variant = JSON.from_native(value)
+			var validated: Variant = _native(native)
+			if validated is Failure:
+				return bridge.fail(-32010, validated.message)
+
+			return { "$godot": native }
+
+
+func _encode_dictionary(value: Dictionary, depth: int) -> Variant:
+	var entries: Array = []
+	for key: Variant in value:
+		var encoded_key: Variant = encode(key, depth + 1)
+		var encoded_value: Variant = encode(value[key], depth + 1)
+		if encoded_key is Failure:
+			return encoded_key
+
+		if encoded_value is Failure:
+			return encoded_value
+
+		entries.append([encoded_key, encoded_value])
+
+	return { "$dictionary": entries }
+
+
+func decode(value: Variant, depth: int = 0) -> Variant:
+	if depth > 16:
+		return bridge.fail(-32602, "Value exceeds the maximum nesting depth")
+
+	if (value is Array or value is Dictionary) and value.size() > 1024:
+		return bridge.fail(-32602, "Collection exceeds 1024 entries")
+
+	if value is Array:
+		var items: Array = []
+		for item: Variant in value:
+			var decoded: Variant = decode(item, depth + 1)
+			if decoded is Failure:
+				return decoded
+
+			items.append(decoded)
+
+		return items
+
+	if value is Dictionary:
+		if value.has("$ref"):
+			return bridge.resolve_object(value["$ref"])
+
+		if value.has("$godot"):
+			# Object construction is intentionally disabled. Existing objects are
+			# addressed only through references issued by this runtime.
+			return _native(value["$godot"])
+
+		var result: Dictionary = { }
+		if value.has("$dictionary"):
+			if not value["$dictionary"] is Array:
+				return bridge.fail(-32602, "Expected dictionary entries")
+
+			if value["$dictionary"].size() > 1024:
+				return bridge.fail(-32602, "Collection exceeds 1024 entries")
+
+			for pair: Variant in value["$dictionary"]:
+				if not pair is Array or pair.size() != 2:
+					return bridge.fail(-32602, "Expected a dictionary key/value pair")
+
+				var key: Variant = decode(pair[0], depth + 1)
+				var item: Variant = decode(pair[1], depth + 1)
+				if key is Failure:
+					return key
+
+				if item is Failure:
+					return item
+
+				result[key] = item
+		else:
+			for key: String in value:
+				var item: Variant = decode(value[key], depth + 1)
+				if item is Failure:
+					return item
+
+				result[key] = item
+
+		return result
+
+	return value
+
+
+func _native(value: Variant) -> Variant:
+	if value is String:
+		if value == "f:inf":
+			return INF
+
+		if value == "f:-inf":
+			return -INF
+
+		if value == "f:nan":
+			return NAN
+
+		if value.begins_with("i:"):
+			var text: String = value.substr(2)
+			if not text.is_valid_int() or str(text.to_int()) != text:
+				return bridge.fail(-32602, "Expected a signed 64-bit integer")
+
+		elif (
+			value not in ["f:inf", "f:-inf", "f:nan"]
+			and not value.begins_with("sn:") and not value.begins_with("np:")
+		):
+			return bridge.fail(-32602, "Unknown native scalar encoding")
+
+		return JSON.to_native(value, false)
+
+	if not value is Dictionary or not value.get("type") is String or not value.get("args") is Array:
+		return bridge.fail(-32602, "Expected a supported native value type and args")
+
+	var type: String = value.type
+	var args: Array = value.args
+	if COMPONENTS.has(type):
+		if args.size() != COMPONENTS[type]:
+			return bridge.fail(-32602, "Incorrect native component count")
+
+	elif PACKED.has(type):
+		if args.size() > 1024 or args.size() % int(PACKED[type]) != 0:
+			return bridge.fail(-32602, "Invalid or oversized packed array")
+
+	else:
+		return bridge.fail(-32602, "Native type is not transferable: " + type)
+
+	for component: Variant in args:
+		if type == "PackedStringArray":
+			if not component is String:
+				return bridge.fail(-32602, "Expected packed string components")
+
+		elif (
+			not (component is float or component is int)
+			or not is_finite(component) or absf(component) > 9007199254740991
+		):
+			return bridge.fail(-32602, "Native components must be finite, JSON-safe numbers")
+
+	return JSON.to_native(value, false)
