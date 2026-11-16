@@ -10,7 +10,9 @@ import { randomBytes } from 'node:crypto';
 const repo = fileURLToPath(new URL('../../', import.meta.url));
 const godot = process.env.STAGEHAND_GODOT ?? 'godot';
 
-export async function launchFixture({ builtins, bindAddress } = {}) {
+export async function launchFixture({
+  builtins, bindAddress, expectedErrors = [], strictDeclarations,
+} = {}) {
   const directory = await mkdtemp(join(tmpdir(), 'stagehand-test-'));
   const token = randomBytes(24).toString('hex');
   let child,
@@ -31,7 +33,10 @@ export async function launchFixture({ builtins, bindAddress } = {}) {
       if (process.platform === 'darwin') await rm(userDirectory, { recursive: true, force: true });
     }
 
-    assert.doesNotMatch(output, /SCRIPT ERROR:|ERROR:/, 'fixture emitted an engine error');
+    for (const line of output.split('\n').filter((line) => /SCRIPT ERROR:|ERROR:/.test(line))) {
+      assert.ok(expectedErrors.some((pattern) => pattern.test(line)),
+        `fixture emitted an unexpected engine error:\n${output}`);
+    }
   };
 
   try {
@@ -46,7 +51,8 @@ export async function launchFixture({ builtins, bindAddress } = {}) {
       (await readFile(project, 'utf8')).replace(
         'config/custom_user_dir_name="stagehand-fixture"',
         `config/custom_user_dir_name="stagehand-tests/${basename(directory)}"`,
-      ),
+      ) + (strictDeclarations ? '\n[debug]\ngdscript/warnings/untyped_declaration=2\n'
+        + 'gdscript/warnings/static_called_on_instance=2\n' : ''),
     );
 
     let binary = godot;
@@ -74,6 +80,7 @@ export async function launchFixture({ builtins, bindAddress } = {}) {
         STAGEHAND_TOKEN: token,
         STAGEHAND_BIND_ADDRESS: bindAddress ?? '',
         ...(builtins ? { STAGEHAND_BUILTINS: builtins.join(',') } : {}),
+        ...(builtins === null ? { STAGEHAND_SKIP_BUILTINS: '1' } : {}),
       },
     });
 
@@ -86,6 +93,12 @@ export async function launchFixture({ builtins, bindAddress } = {}) {
         output += chunk.toString();
 
         const match = output.match(/STAGEHAND_READY (\d+)/);
+        if (!match && /SCRIPT ERROR:|ERROR:/.test(output)) {
+          clearTimeout(timer);
+          reject(new Error(`Fixture failed to load:\n${output}`));
+
+          return;
+        }
         if (match) {
           clearTimeout(timer);
           let host = bindAddress ?? '127.0.0.1';
@@ -110,7 +123,25 @@ export async function launchFixture({ builtins, bindAddress } = {}) {
       });
     });
 
-    return { url, token, stop, output: () => output };
+    const waitForOutput = (pattern) => new Promise((resolve, reject) => {
+      const check = () => {
+        if (pattern.test(output)) finish();
+      };
+      const finish = (error) => {
+        clearTimeout(timer);
+        child.stdout.off('data', check);
+        child.stderr.off('data', check);
+        if (error) reject(error);
+        else resolve(output);
+      };
+      const timer = setTimeout(() => finish(new Error(`Missing fixture output: ${pattern}`)), 2000);
+
+      child.stdout.on('data', check);
+      child.stderr.on('data', check);
+      check();
+    });
+
+    return { url, token, stop, output: () => output, waitForOutput };
   } catch (error) {
     await stop().catch(() => {});
 

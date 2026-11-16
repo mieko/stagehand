@@ -10,7 +10,6 @@ const MAX_PEERS := 8
 const Values = preload("values.gd")
 const Failure = preload("failure.gd")
 const Builtins = preload("builtins.gd")
-const InputEndpoint = preload("input.gd")
 
 var _server := TCPServer.new()
 var _rpc := JSONRPC.new()
@@ -22,6 +21,7 @@ var _token := ""
 var _instance := ""
 var _values: RefCounted
 var _builtins: RefCounted
+var _builtin_names: Array[String] = []
 var _request_peer: WebSocketPeer
 var _scene_id := 0
 var _world_generation := 0
@@ -65,31 +65,43 @@ func get_port() -> int:
 	return _server.get_local_port()
 
 
-func enable_builtins(
-	names: PackedStringArray = ["Runtime", "SceneTree", "Object", "Screen", "Input"]
-) -> void:
+func enable_builtins(names: PackedStringArray = Builtins.NAMES) -> Error:
 	if _builtins != null:
-		return
+		return ERR_ALREADY_IN_USE
+
+	for name: String in names:
+		if name not in Builtins.NAMES:
+			return ERR_INVALID_PARAMETER
+
+	for name: String in Builtins.NAMES:
+		if name in names:
+			_builtin_names.append(name)
 
 	_builtins = Builtins.new(self)
-	_builtins.install(names)
+	_builtins.install(PackedStringArray(_builtin_names))
 
-	if "Input" in names:
-		var endpoint := InputEndpoint.new(self)
-		endpoint.name = "InputEndpoint"
-		add_child(endpoint)
+	return OK
+
+
+func builtin_configuration() -> Dictionary:
+	return {
+		"configured": _builtins != null,
+		"available": Builtins.NAMES.duplicate(),
+		"selected": _builtin_names.duplicate(),
+	}
 
 
 func stop() -> void:
-	for peer: WebSocketPeer in _peers.keys():
+	var peers := _peers.keys()
+	_peers.clear()
+	_server.stop()
+	set_process(false)
+
+	for peer: WebSocketPeer in peers:
 		connection_closed.emit(peer)
 		peer.close(1001, "Stagehand connection stopped")
 
-	_peers.clear()
 	_prune_signals()
-
-	_server.stop()
-	set_process(false)
 
 
 func _exit_tree() -> void:
@@ -106,7 +118,7 @@ func register_object(
 	observer: Callable = Callable(),
 	events: PackedStringArray = [],
 	operation_info: Dictionary = { },
-	registered: bool = true,
+	discoverable: bool = true,
 	version: String = "",
 ) -> String:
 	_next_object += 1
@@ -118,7 +130,7 @@ func register_object(
 		"operations": operations,
 		"observer": observer,
 		"events": events,
-		"registered": registered,
+		"discoverable": discoverable,
 		"operation_info": operation_info,
 		"version": version,
 		"native_signals": { },
@@ -127,7 +139,7 @@ func register_object(
 	if target is Node and not target.tree_exiting.is_connected(_unregister_target):
 		target.tree_exiting.connect(_unregister_target.bind(target), CONNECT_ONE_SHOT)
 
-	if registered:
+	if discoverable:
 		_broadcast("objects.added", _describe(handle))
 
 	return handle
@@ -138,6 +150,13 @@ func fail(code: int, message: String) -> Failure:
 
 
 func request_peer() -> WebSocketPeer:
+	if (
+		_request_peer == null or not _peers.has(_request_peer)
+		or not _peers[_request_peer].authenticated
+		or _request_peer.get_ready_state() != WebSocketPeer.STATE_OPEN
+	):
+		return null
+
 	return _request_peer
 
 
@@ -145,7 +164,7 @@ func reference(target: Object) -> String:
 	var fallback := ""
 	for handle: String in _objects:
 		if _objects[handle].target.get_ref() == target:
-			if _objects[handle].registered:
+			if _objects[handle].discoverable:
 				return handle
 
 			fallback = handle
@@ -162,11 +181,15 @@ func reference_type(handle: String) -> String:
 
 func resolve_object(handle: Variant) -> Variant:
 	if not handle is String or not _objects.has(handle):
-		return fail(-32004, "Unknown or expired object")
+		return fail(Failure.UNKNOWN_HANDLE, "Unknown or expired object")
 
 	var target: Object = _objects[handle].target.get_ref()
 
-	return target if is_instance_valid(target) else fail(-32004, "Unknown or expired object")
+	return (
+		target
+		if is_instance_valid(target)
+		else fail(Failure.UNKNOWN_HANDLE, "Unknown or expired object")
+	)
 
 
 func unregister_object(handle: String) -> void:
@@ -226,31 +249,38 @@ func _prune_signals() -> void:
 
 func _listen_signal(handle: String, event: String) -> Variant:
 	var entry: Dictionary = _objects[handle]
-	if event in entry.events or entry.native_signals.has(event):
+	if entry.native_signals.has(event):
 		return null
 
 	var target: Object = entry.target.get_ref()
+	if event in entry.events:
+		if not target.has_signal(event):
+			return null
+	elif _builtins == null or not _builtins.native_signals_enabled:
+		return fail(Failure.INVALID_PARAMS, "Undeclared native signals require the Object builtin")
+
 	if not target.has_signal(event):
-		return fail(-32602, "Unknown registered event or signal")
+		return fail(Failure.INVALID_PARAMS, "Unknown registered event or signal")
 
 	var callback := func(...args):
 		publish(handle, event, args)
 
 	if target.connect(event, callback) != OK:
-		return fail(-32010, "Cannot subscribe to signal")
+		return fail(Failure.RESOURCE_LIMIT, "Cannot subscribe to signal")
 
 	entry.native_signals[event] = callback
 
 	return null
 
 
-func publish(handle: String, event: String, value: Variant) -> void:
+func publish(handle: String, event: String, value: Variant, at: Dictionary = { }) -> void:
 	if (
 		not _objects.has(handle)
 		or (event not in _objects[handle].events and not _objects[handle].native_signals.has(event))
 	):
 		return
 
+	var event_clock := _clock() if at.is_empty() else at
 	for peer: WebSocketPeer in _peers:
 		var state: Dictionary = _peers[peer]
 		for subscription: String in state.subscriptions:
@@ -259,14 +289,49 @@ func publish(handle: String, event: String, value: Variant) -> void:
 				_notify(
 					peer,
 					"object.event",
-					{
-						"subscription": subscription,
-						"object": handle,
-						"event": event,
-						"value": value,
-						"clock": _clock(),
-					},
+					_event_params(subscription, handle, event, value, event_clock),
 				)
+
+
+## Preflight the same event envelope and serializer used by publish().
+func publication_error(handle: String, event: String, value: Variant, at: Dictionary) -> Variant:
+	var longest_subscription := ""
+	for state: Dictionary in _peers.values():
+		for subscription: String in state.subscriptions:
+			var entry: Dictionary = state.subscriptions[subscription]
+			if entry.object == handle and entry.event == event:
+				if subscription.length() > longest_subscription.length():
+					longest_subscription = subscription
+
+	var params := _event_params(longest_subscription, handle, event, value, at)
+	var encoded: Variant = _values.encode(params)
+	if encoded is Failure:
+		return encoded
+
+	var message: Variant = _serialize(_rpc.make_notification("object.event", encoded))
+
+	return message if message is Failure else null
+
+
+func _event_params(
+	subscription: String,
+	handle: String,
+	event: String,
+	value: Variant,
+	at: Dictionary,
+) -> Dictionary:
+	return {
+		"subscription": subscription,
+		"object": handle,
+		"event": event,
+		"value": value,
+		"clock": at,
+	}
+
+
+## Observation metadata shared by core and game-owned endpoints.
+func clock() -> Dictionary:
+	return _clock()
 
 
 func _clock() -> Dictionary:
@@ -304,6 +369,9 @@ func _process(_delta: float) -> void:
 			}
 
 	for peer: WebSocketPeer in _peers.keys():
+		if not _peers.has(peer):
+			continue
+
 		peer.poll()
 		if peer.get_ready_state() == WebSocketPeer.STATE_CLOSED:
 			connection_closed.emit(peer)
@@ -321,6 +389,9 @@ func _process(_delta: float) -> void:
 			continue
 
 		for packet: int in mini(peer.get_available_packet_count(), MAX_PACKETS_PER_FRAME):
+			if not _peers.has(peer):
+				break
+
 			var bytes := peer.get_packet()
 			if not peer.was_string_packet() or bytes.size() > MAX_MESSAGE_BYTES:
 				peer.close(1009, "Expected a bounded JSON text message")
@@ -328,7 +399,7 @@ func _process(_delta: float) -> void:
 
 			var parser := JSON.new()
 			if parser.parse(bytes.get_string_from_utf8()) != OK:
-				_send(peer, _rpc.make_response_error(JSONRPC.PARSE_ERROR, "Invalid JSON"))
+				_send(peer, _rpc.make_response_error(Failure.PARSE_ERROR, "Invalid JSON"))
 			else:
 				var response: Variant = _request(peer, parser.data)
 				if response != null:
@@ -343,14 +414,17 @@ func _request(peer: WebSocketPeer, request: Variant) -> Variant:
 	if request is Array:
 		if request.is_empty() or request.size() > 64:
 			return _rpc.make_response_error(
-				JSONRPC.INVALID_REQUEST,
+				Failure.INVALID_REQUEST,
 				"Batch must contain 1..64 requests",
 			)
 
 		var responses: Array = []
 		for item: Variant in request:
+			if not _peers.has(peer) or peer.get_ready_state() != WebSocketPeer.STATE_OPEN:
+				break
+
 			var response: Variant = (
-				_rpc.make_response_error(JSONRPC.INVALID_REQUEST, "Nested batch")
+				_rpc.make_response_error(Failure.INVALID_REQUEST, "Nested batch")
 				if item is Array
 				else _request(peer, item)
 			)
@@ -363,7 +437,7 @@ func _request(peer: WebSocketPeer, request: Variant) -> Variant:
 		not request is Dictionary or request.get("jsonrpc") != "2.0"
 		or not request.get("method") is String
 	):
-		return _rpc.make_response_error(JSONRPC.INVALID_REQUEST, "Expected a JSON-RPC 2.0 request")
+		return _rpc.make_response_error(Failure.INVALID_REQUEST, "Expected a JSON-RPC 2.0 request")
 
 	var id: Variant = request.get("id")
 	if (
@@ -373,17 +447,17 @@ func _request(peer: WebSocketPeer, request: Variant) -> Variant:
 			or (id is float and is_finite(id) and id == floor(id)) or id is int
 		)
 	):
-		return _rpc.make_response_error(JSONRPC.INVALID_REQUEST, "Invalid request ID")
+		return _rpc.make_response_error(Failure.INVALID_REQUEST, "Invalid request ID")
 
 	var result: Variant
 	if not request.get("params", { }) is Dictionary:
-		result = Failure.new(JSONRPC.INVALID_PARAMS, "This API uses named Dictionary parameters")
+		result = Failure.new(Failure.INVALID_PARAMS, "This API uses named Dictionary parameters")
 	else:
 		var params: Variant = _values.decode(request.get("params", { }))
 		if params is Failure:
 			result = params
 		elif not params is Dictionary:
-			result = fail(JSONRPC.INVALID_PARAMS, "Expected named parameters")
+			result = fail(Failure.INVALID_PARAMS, "Expected named parameters")
 		else:
 			result = _dispatch(peer, request.method, params)
 
@@ -404,10 +478,10 @@ func _dispatch(peer: WebSocketPeer, method: String, params: Dictionary) -> Varia
 	var state: Dictionary = _peers[peer]
 	if method == "session.hello":
 		if params.get("token") != _token:
-			return Failure.new(-32001, "Authentication failed")
+			return Failure.new(Failure.AUTHENTICATION_FAILED, "Authentication failed")
 
 		if params.get("protocol", 1) != PROTOCOL_VERSION:
-			return fail(-32002, "Unsupported protocol version")
+			return fail(Failure.UNSUPPORTED_PROTOCOL, "Unsupported protocol version")
 
 		state.authenticated = true
 
@@ -420,7 +494,7 @@ func _dispatch(peer: WebSocketPeer, method: String, params: Dictionary) -> Varia
 			"objects": _dispatch(peer, "objects.list", { }),
 		}
 	if not state.authenticated:
-		return Failure.new(-32001, "Authenticate with session.hello first")
+		return Failure.new(Failure.AUTHENTICATION_FAILED, "Authenticate with session.hello first")
 
 	if method == "objects.list":
 		return _list_objects()
@@ -432,11 +506,14 @@ func _dispatch(peer: WebSocketPeer, method: String, params: Dictionary) -> Varia
 		return removed
 
 	if method not in ["object.describe", "object.observe", "object.call", "object.subscribe"]:
-		return Failure.new(JSONRPC.METHOD_NOT_FOUND, "Unknown method: " + method)
+		return Failure.new(Failure.METHOD_NOT_FOUND, "Unknown method: " + method)
 
 	var handle: Variant = params.get("object")
-	if not handle is String or not _objects.has(handle) or _objects[handle].target.get_ref() == null:
-		return Failure.new(-32004, "Unknown or expired object")
+	if (
+		not handle is String or not _objects.has(handle)
+		or _objects[handle].target.get_ref() == null
+	):
+		return Failure.new(Failure.UNKNOWN_HANDLE, "Unknown or expired object")
 
 	var entry: Dictionary = _objects[handle]
 	match method:
@@ -451,11 +528,11 @@ func _dispatch(peer: WebSocketPeer, method: String, params: Dictionary) -> Varia
 		"object.call":
 			var operation: Variant = params.get("method")
 			if not operation is String or not entry.operations.has(operation):
-				return Failure.new(JSONRPC.METHOD_NOT_FOUND, "Unknown registered operation")
+				return Failure.new(Failure.METHOD_NOT_FOUND, "Unknown registered operation")
 
 			if not params.get("params", { }) is Dictionary:
 				return Failure.new(
-					JSONRPC.INVALID_PARAMS,
+					Failure.INVALID_PARAMS,
 					"Operation parameters must be a Dictionary",
 				)
 
@@ -466,10 +543,10 @@ func _dispatch(peer: WebSocketPeer, method: String, params: Dictionary) -> Varia
 			return result
 		"object.subscribe":
 			if state.subscriptions.size() >= 128:
-				return fail(-32010, "Subscription limit reached")
+				return fail(Failure.RESOURCE_LIMIT, "Subscription limit reached")
 
 			if not params.get("event") is String:
-				return fail(-32602, "Expected event name")
+				return fail(Failure.INVALID_PARAMS, "Expected event name")
 
 			var error: Variant = _listen_signal(handle, params.event)
 			if error is Failure:
@@ -481,13 +558,13 @@ func _dispatch(peer: WebSocketPeer, method: String, params: Dictionary) -> Varia
 
 			return subscription
 
-	return Failure.new(JSONRPC.INTERNAL_ERROR, "Dispatch failed")
+	return Failure.new(Failure.INTERNAL_ERROR, "Dispatch failed")
 
 
 func _list_objects(_params: Dictionary = { }) -> Array[Dictionary]:
 	var objects: Array[Dictionary] = []
 	for handle: String in _objects:
-		if _objects[handle].target.get_ref() != null and _objects[handle].registered:
+		if _objects[handle].target.get_ref() != null and _objects[handle].discoverable:
 			objects.append(_describe(handle))
 
 	return objects
@@ -510,12 +587,20 @@ func _describe(handle: String) -> Dictionary:
 	return description
 
 
+func _serialize(value: Variant) -> Variant:
+	var message := JSON.stringify(value)
+	if message.to_utf8_buffer().size() > MAX_MESSAGE_BYTES:
+		return fail(Failure.RESOURCE_LIMIT, "Message exceeds the 8 MiB transport limit")
+
+	return message
+
+
 func _send(peer: WebSocketPeer, value: Variant) -> void:
 	if peer.get_ready_state() != WebSocketPeer.STATE_OPEN:
 		return
 
-	var message := JSON.stringify(value)
-	if message.to_utf8_buffer().size() > MAX_MESSAGE_BYTES or peer.send_text(message) != OK:
+	var message: Variant = _serialize(value)
+	if message is Failure or peer.send_text(message) != OK:
 		peer.close(1011, "Cannot deliver response")
 
 

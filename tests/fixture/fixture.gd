@@ -4,9 +4,17 @@ const Bridge = preload("res://addons/stagehand/bridge.gd")
 
 
 class Probe extends Node:
+	const NEGATIVE_COUNTER := -32040
+
 	signal native_changed(value: int)
 	signal native_empty
-	signal native_payload(first, second, third, fourth, fifth)
+	signal native_payload(
+		first: Variant,
+		second: Variant,
+		third: Variant,
+		fourth: Variant,
+		fifth: Variant,
+	)
 
 	var count := 0
 	var handle := ""
@@ -22,7 +30,7 @@ class Probe extends Node:
 
 	func observe() -> Variant:
 		if count < 0:
-			return bridge.fail(-32040, "Negative fixture counter cannot be observed")
+			return bridge.fail(NEGATIVE_COUNTER, "Negative fixture counter cannot be observed")
 
 		return { "count": count, "name": name, "self": self }
 
@@ -61,6 +69,22 @@ class Probe extends Node:
 
 	func echo(params: Dictionary) -> Variant:
 		return params.get("value")
+
+
+	func configure_builtins(params: Dictionary) -> Variant:
+		if params.has("names"):
+			return bridge.enable_builtins(PackedStringArray(params.names))
+
+		return bridge.enable_builtins()
+
+
+	func builtin_configuration(params: Dictionary) -> Dictionary:
+		var configuration: Dictionary = bridge.builtin_configuration()
+		if params.get("mutate_copy", false):
+			configuration.available.clear()
+			configuration.selected.append("Changed copy")
+
+		return configuration
 
 
 	func unsupported(_params: Dictionary) -> Callable:
@@ -110,10 +134,39 @@ var motion_samples: Array = []
 var mouse_held := false
 var heartbeat := 0
 var wheel_events: Array = []
+var back_ticks := 0
+var capsule := Node3D.new()
+var reenter_on_release := false
+var reentry_result: Dictionary = { }
+var pause_after_tick := false
+var start_on_press := false
+var reentry_action := ""
+var release_button_on_pointer := false
+var button_release_position := Vector2.ZERO
 
 
 func _input(event: InputEvent) -> void:
 	event_count += 1
+	if start_on_press and event.is_action_pressed("move_forward"):
+		start_on_press = false
+		var endpoint := $Stagehand/InputEndpoint
+		endpoint.release({ "action": "move_forward" })
+		var started: Dictionary = endpoint.sequence({ "ticks": 60 })
+		reentry_action = started.action
+
+	if reenter_on_release and event.is_action_released("move_forward"):
+		reenter_on_release = false
+		var endpoint := $Stagehand/InputEndpoint
+		var active: Variant = endpoint.observe_input().active_action
+		var cancelled: Variant = endpoint.cancel({ "action": active })
+		var started: Variant = endpoint.sequence({ "ticks": 1 })
+		reentry_result = { "cancel_status": cancelled.status, "start_error": started.code }
+
+	var wheel: bool = event is InputEventMouseButton and event.button_index >= MOUSE_BUTTON_WHEEL_UP
+	if release_button_on_pointer and (event is InputEventMouseMotion or wheel):
+		release_button_on_pointer = false
+		$Stagehand/InputEndpoint.release({ "button": "left" })
+
 	if event is InputEventMouseMotion:
 		last_motion = event.relative
 		last_screen_motion = event.screen_relative
@@ -121,9 +174,14 @@ func _input(event: InputEvent) -> void:
 		polled_mouse = get_viewport().get_mouse_position()
 		if motion_samples.size() >= 256:
 			motion_samples.pop_front()
+
 		motion_samples.append({ "position": event.position, "ms": Time.get_ticks_msec() })
+
 	if event is InputEventMouseButton:
 		mouse_held = Input.is_mouse_button_pressed(MOUSE_BUTTON_LEFT)
+		if event.button_index == MOUSE_BUTTON_LEFT and not event.pressed:
+			button_release_position = event.position
+
 		if event.button_index >= MOUSE_BUTTON_WHEEL_UP:
 			wheel_events.append(
 				{ "button": event.button_index, "factor": event.factor, "pressed": event.pressed }
@@ -136,22 +194,43 @@ func _physics_process(_delta: float) -> void:
 	last_strength = Input.get_action_strength("move_forward")
 	if forward_held:
 		input_ticks += 1
+		capsule.position.y += _delta
 		$TestViewport/Panel.color = Color(0.8, 0.15, 0.1)
+
+	if Input.is_action_pressed("move_back"):
+		back_ticks += 1
+		capsule.position.y -= _delta
+
+	if pause_after_tick:
+		pause_after_tick = false
+		get_tree().paused = true
 
 
 func _ready() -> void:
+	capsule.name = "Capsule"
+	add_child(capsule)
+
 	InputMap.add_action("move_forward")
 	var key := InputEventKey.new()
 	key.physical_keycode = KEY_W
 	InputMap.action_add_event("move_forward", key)
+
 	InputMap.add_action("jump")
+
+	InputMap.add_action("move_back")
+	var back := InputEventKey.new()
+	back.physical_keycode = KEY_S
+	InputMap.action_add_event("move_back", back)
+
 	$ClickTarget.pressed.connect(
-		func():
+		func() -> void:
 			clicks += 1,
 	)
+
 	var bridge := Bridge.new()
 	bridge.name = "Stagehand"
 	add_child(bridge)
+
 	var token := OS.get_environment("STAGEHAND_TOKEN")
 	var bind_address := OS.get_environment("STAGEHAND_BIND_ADDRESS")
 	var result: Error
@@ -181,13 +260,15 @@ func _ready() -> void:
 				"spawn": probe.spawn,
 				"emit_native": probe.emit_native,
 				"echo": probe.echo,
+				"configure_builtins": probe.configure_builtins,
+				"builtin_configuration": probe.builtin_configuration,
 				"unsupported": probe.unsupported,
 				"large_output": probe.large_output,
 				"image_info": probe.image_info,
 				"retire": probe.retire,
 			},
 			probe.observe,
-			["changed"],
+			["changed", "native_changed"] if label == "A" else ["changed"],
 			{
 				"increment": {
 					"params": { "amount": "number; default 1" },
@@ -195,11 +276,42 @@ func _ready() -> void:
 				},
 			},
 		)
-	if OS.has_environment("STAGEHAND_BUILTINS"):
-		bridge.enable_builtins(OS.get_environment("STAGEHAND_BUILTINS").split(",", false))
-	else:
-		bridge.enable_builtins()
+
+	if not OS.has_environment("STAGEHAND_SKIP_BUILTINS"):
+		var setup_error: Error
+		if OS.has_environment("STAGEHAND_BUILTINS"):
+			setup_error = bridge.enable_builtins(
+				OS.get_environment("STAGEHAND_BUILTINS").split(",", false)
+			)
+		else:
+			setup_error = bridge.enable_builtins()
+
+		if setup_error != OK:
+			push_error("Cannot configure Stagehand: " + error_string(setup_error))
+			get_tree().quit(1)
+
+			return
+
 	print("STAGEHAND_READY ", bridge.get_port())
+
+
+func press_after_close(_peer: WebSocketPeer) -> void:
+	var result: Variant = $Stagehand/InputEndpoint.press({ "action": "move_forward" })
+	reentry_result["closed_press"] = result.code if result is Bridge.Failure else 0
+
+
+func report_input() -> void:
+	var state: Dictionary = $Stagehand/InputEndpoint.observe_input()
+	print(
+		"FIXTURE_INPUT_REPORT ",
+		JSON.stringify(
+			{
+				"held": Input.is_action_pressed("move_forward"),
+				"input_ticks": input_ticks,
+				"active": state.active_action,
+			}
+		),
+	)
 
 
 func retire_bridge() -> void:

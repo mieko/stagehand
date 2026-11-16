@@ -58,7 +58,8 @@ test('core roots advertise their API versions', async () => {
     SceneTree: '1.0.0',
     Object: '1.0.0',
     Screen: '1.0.0',
-    Input: '1.0.0',
+    Input: '1.1.0',
+    Script: '1.0.0',
   };
 
   for (const [label, version] of Object.entries(versions)) {
@@ -687,6 +688,30 @@ test('mouse buttons reach GUI input and release polled button state', async () =
   assert.equal(await scene.get('mouse_held'), false);
   assert.equal(await scene.get('clicks'), before + 1);
 });
+
+for (const operation of ['move_mouse', 'scroll']) {
+  test(`${operation} exposes its cursor before reentrant button release`, async () => {
+    const input = await client.builtin('Input');
+    const scene = await fixtureScene();
+    const origin = new GodotValue({type: 'Vector2', args: [20, 20]});
+    const position = new GodotValue({type: 'Vector2', args: [160, 160]});
+    await input.invoke('press', {button: 'left', position: origin});
+
+    try {
+      await scene.set('release_button_on_pointer', true);
+      await input.invoke(operation, {position, ...(operation === 'scroll' ? {vertical: 1} : {})});
+
+      assert.equal(await scene.get('mouse_held'), false);
+      assert.deepEqual((await scene.get('button_release_position')).args, position.args);
+      assert.deepEqual((await input.observe()).value.synthetic_position.args, position.args);
+    } finally {
+      await scene.set('release_button_on_pointer', false);
+      if ((await input.observe()).value.held_inputs.includes('button:left')) {
+        await input.invoke('release', {button: 'left'});
+      }
+    }
+  });
+}
 
 test('scroll pulses reach a native ScrollContainer, preserve holds and obey Input ownership', async () => {
   const input = await client.builtin('Input'),

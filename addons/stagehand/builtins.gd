@@ -1,9 +1,14 @@
 extends RefCounted
 
 const Failure = preload("failure.gd")
+const InputEndpoint = preload("input.gd")
+const ScriptEndpoint = preload("script.gd")
+const NAMES := ["Runtime", "SceneTree", "Object", "Screen", "Input", "Script"]
 
 var bridge: Node
+var native_signals_enabled := false
 var _next_capture := 0
+var _scripts: RefCounted
 
 
 func _init(owner: Node) -> void:
@@ -38,6 +43,7 @@ func install(names: PackedStringArray) -> void:
 		)
 
 	if "Object" in names:
+		native_signals_enabled = true
 		bridge.register_object(
 			self,
 			"Object",
@@ -68,6 +74,25 @@ func install(names: PackedStringArray) -> void:
 			"1.0.0",
 		)
 
+	if "Script" in names:
+		_scripts = ScriptEndpoint.new(bridge)
+		bridge.register_object(
+			_scripts,
+			"Script",
+			"Script",
+			{ "evaluate": _scripts.evaluate },
+			Callable(),
+			[],
+			{ },
+			true,
+			"1.0.0",
+		)
+
+	if "Input" in names:
+		var endpoint := InputEndpoint.new(bridge, _scripts)
+		endpoint.name = "InputEndpoint"
+		bridge.add_child(endpoint)
+
 
 func runtime_info(_params: Dictionary) -> Dictionary:
 	return runtime_observation()
@@ -91,11 +116,11 @@ func current(_params: Dictionary) -> Dictionary:
 func query(params: Dictionary) -> Variant:
 	var parent: Variant = params.get("root", bridge.get_tree().root)
 	if not parent is Node:
-		return bridge.fail(-32602, "Query root must be a live Node reference")
+		return bridge.fail(Failure.INVALID_PARAMS, "Query root must be a live Node reference")
 
 	var limit: Variant = params.get("limit", 100)
 	if not (limit is float or limit is int) or limit < 1 or limit > 1000 or limit != floor(limit):
-		return bridge.fail(-32602, "Query limit must be an integer in 1..1000")
+		return bridge.fail(Failure.INVALID_PARAMS, "Query limit must be an integer in 1..1000")
 
 	var queue: Array[Node] = [parent]
 	var nodes: Array = []
@@ -117,6 +142,7 @@ func query(params: Dictionary) -> Variant:
 					"parent": node.get_parent(),
 				},
 			)
+
 		queue.append_array(node.get_children(bool(params.get("internal", false))))
 
 	return { "nodes": nodes, "truncated": not queue.is_empty() }
@@ -125,7 +151,7 @@ func query(params: Dictionary) -> Variant:
 func inspect_object(params: Dictionary) -> Variant:
 	var target: Variant = params.get("target")
 	if not target is Object or not is_instance_valid(target):
-		return bridge.fail(-32602, "Expected a live target reference")
+		return bridge.fail(Failure.INVALID_PARAMS, "Expected a live target reference")
 
 	return {
 		"class": target.get_class(),
@@ -137,14 +163,17 @@ func inspect_object(params: Dictionary) -> Variant:
 
 func _property(params: Dictionary) -> Variant:
 	var target: Variant = params.get("target")
-	if not target is Object or not is_instance_valid(target) or not params.get("property") is String:
-		return bridge.fail(-32602, "Expected a live target and property name")
+	if (
+		not target is Object or not is_instance_valid(target)
+		or not params.get("property") is String
+	):
+		return bridge.fail(Failure.INVALID_PARAMS, "Expected a live target and property name")
 
 	for entry: Dictionary in target.get_property_list():
 		if entry.name == params.property:
 			return entry
 
-	return bridge.fail(-32602, "Unknown property: " + params.property)
+	return bridge.fail(Failure.INVALID_PARAMS, "Unknown property: " + params.property)
 
 
 func get_property(params: Dictionary) -> Variant:
@@ -161,7 +190,7 @@ func set_property(params: Dictionary) -> Variant:
 		return property
 
 	if not params.has("value"):
-		return bridge.fail(-32602, "Missing property value")
+		return bridge.fail(Failure.INVALID_PARAMS, "Missing property value")
 
 	var error: Variant = _check_type(params.value, property)
 	if error is Failure:
@@ -180,10 +209,13 @@ func call_method(params: Dictionary) -> Variant:
 		not target is Object or not is_instance_valid(target)
 		or not method is String or not args is Array
 	):
-		return bridge.fail(-32602, "Expected a live target, method name, and argument array")
+		return bridge.fail(
+			Failure.INVALID_PARAMS,
+			"Expected a live target, method name, and argument array",
+		)
 
 	if not target.has_method(method):
-		return bridge.fail(-32601, "Unknown reflected method")
+		return bridge.fail(Failure.METHOD_NOT_FOUND, "Unknown reflected method")
 
 	for info: Dictionary in target.get_method_list():
 		if info.name == method and not (int(info.get("flags", 0)) & METHOD_FLAG_VARARG):
@@ -191,7 +223,7 @@ func call_method(params: Dictionary) -> Variant:
 			var complete: bool = info.get("args", []).size() == maximum
 			var minimum: int = maximum - info.get("default_args", []).size() if complete else 0
 			if args.size() < minimum or args.size() > maximum:
-				return bridge.fail(-32602, "Incorrect argument count")
+				return bridge.fail(Failure.INVALID_PARAMS, "Incorrect argument count")
 
 			if complete:
 				for index: int in args.size():
@@ -211,7 +243,7 @@ func _check_type(value: Variant, info: Dictionary) -> Variant:
 		expected == TYPE_OBJECT and value is Object
 		and ClassDB.class_exists(class_name_hint) and not value.is_class(class_name_hint)
 	):
-		return bridge.fail(-32602, "Expected an object of class " + class_name_hint)
+		return bridge.fail(Failure.INVALID_PARAMS, "Expected an object of class " + class_name_hint)
 
 	if expected == TYPE_NIL or typeof(value) == expected:
 		return null
@@ -229,7 +261,7 @@ func _check_type(value: Variant, info: Dictionary) -> Variant:
 		return null
 
 	return bridge.fail(
-		-32602,
+		Failure.INVALID_PARAMS,
 		"Expected " + type_string(expected) + ", received " + type_string(typeof(value)),
 	)
 
@@ -242,7 +274,10 @@ func viewports(_params: Dictionary) -> Variant:
 	while not queue.is_empty() and result.size() < 100:
 		visited += 1
 		if visited > 10000:
-			return bridge.fail(-32010, "Viewport scan exceeds 10000 nodes; query a smaller subtree")
+			return bridge.fail(
+				Failure.RESOURCE_LIMIT,
+				"Viewport scan exceeds 10000 nodes; query a smaller subtree",
+			)
 
 		var node: Node = queue.pop_front()
 		if node is Viewport:
@@ -253,6 +288,7 @@ func viewports(_params: Dictionary) -> Variant:
 					"size": node.get_visible_rect().size,
 				}
 			)
+
 		queue.append_array(node.get_children())
 
 	return result
@@ -264,7 +300,7 @@ func _viewport(params: Dictionary) -> Variant:
 	return (
 		viewport
 		if viewport is Viewport
-		else bridge.fail(-32602, "Expected a Viewport reference")
+		else bridge.fail(Failure.INVALID_PARAMS, "Expected a Viewport reference")
 	)
 
 
@@ -287,14 +323,14 @@ func capture(params: Dictionary) -> Variant:
 		return viewport
 
 	if DisplayServer.get_name() == "headless":
-		return bridge.fail(-32020, "No rendered viewport in a headless display")
+		return bridge.fail(Failure.IMAGE_UNAVAILABLE, "No rendered viewport in a headless display")
 
 	var image: Image = viewport.get_texture().get_image()
 	if image == null or image.is_empty():
-		return bridge.fail(-32020, "Viewport has no rendered image")
+		return bridge.fail(Failure.IMAGE_UNAVAILABLE, "Viewport has no rendered image")
 
 	_next_capture += 1
-	var clock: Dictionary = bridge._clock()
+	var clock: Dictionary = bridge.clock()
 
 	return {
 		"viewport": viewport,

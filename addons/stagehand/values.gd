@@ -40,9 +40,37 @@ func _init(owner: Node) -> void:
 	bridge = owner
 
 
+func snapshot(value: Variant, depth: int = 0) -> Variant:
+	if depth > 16:
+		return bridge.fail(Failure.RESOURCE_LIMIT, "Value exceeds the maximum nesting depth")
+
+	if value is Array or value is Dictionary:
+		if value.size() > 1024:
+			return bridge.fail(Failure.RESOURCE_LIMIT, "Snapshot collection exceeds 1024 entries")
+
+		var copy: Variant = value.duplicate()
+		if value is Dictionary:
+			copy.clear()
+
+		for key: Variant in (range(value.size()) if value is Array else value.keys()):
+			var item: Variant = snapshot(value[key], depth + 1)
+			var copied_key: Variant = snapshot(key, depth + 1)
+			if item is Failure or copied_key is Failure:
+				return item if item is Failure else copied_key
+
+			copy[copied_key] = item
+
+		return copy
+
+	if typeof(value) >= TYPE_PACKED_BYTE_ARRAY:
+		return value.duplicate()
+
+	return value
+
+
 func encode(value: Variant, depth: int = 0) -> Variant:
 	if depth > 16:
-		return bridge.fail(-32010, "Value exceeds the maximum nesting depth")
+		return bridge.fail(Failure.RESOURCE_LIMIT, "Value exceeds the maximum nesting depth")
 
 	match typeof(value):
 		TYPE_NIL, TYPE_BOOL, TYPE_STRING:
@@ -70,7 +98,7 @@ func encode(value: Variant, depth: int = 0) -> Variant:
 		TYPE_ARRAY, TYPE_DICTIONARY:
 			if value.size() > 1024:
 				return bridge.fail(
-					-32010,
+					Failure.RESOURCE_LIMIT,
 					"Collection exceeds 1024 entries; request a smaller view",
 				)
 
@@ -99,14 +127,14 @@ func encode(value: Variant, depth: int = 0) -> Variant:
 			return result
 		TYPE_CALLABLE, TYPE_SIGNAL, TYPE_RID:
 			return bridge.fail(
-				-32010,
+				Failure.RESOURCE_LIMIT,
 				"Value type is not transferable: " + type_string(typeof(value)),
 			)
 		_:
 			var native: Variant = JSON.from_native(value)
 			var validated: Variant = _native(native)
 			if validated is Failure:
-				return bridge.fail(-32010, validated.message)
+				return bridge.fail(Failure.RESOURCE_LIMIT, validated.message)
 
 			return { "$godot": native }
 
@@ -129,10 +157,10 @@ func _encode_dictionary(value: Dictionary, depth: int) -> Variant:
 
 func decode(value: Variant, depth: int = 0) -> Variant:
 	if depth > 16:
-		return bridge.fail(-32602, "Value exceeds the maximum nesting depth")
+		return bridge.fail(Failure.INVALID_PARAMS, "Value exceeds the maximum nesting depth")
 
 	if (value is Array or value is Dictionary) and value.size() > 1024:
-		return bridge.fail(-32602, "Collection exceeds 1024 entries")
+		return bridge.fail(Failure.INVALID_PARAMS, "Collection exceeds 1024 entries")
 
 	if value is Array:
 		var items: Array = []
@@ -157,14 +185,17 @@ func decode(value: Variant, depth: int = 0) -> Variant:
 		var result: Dictionary = { }
 		if value.has("$dictionary"):
 			if not value["$dictionary"] is Array:
-				return bridge.fail(-32602, "Expected dictionary entries")
+				return bridge.fail(Failure.INVALID_PARAMS, "Expected dictionary entries")
 
 			if value["$dictionary"].size() > 1024:
-				return bridge.fail(-32602, "Collection exceeds 1024 entries")
+				return bridge.fail(Failure.INVALID_PARAMS, "Collection exceeds 1024 entries")
 
 			for pair: Variant in value["$dictionary"]:
 				if not pair is Array or pair.size() != 2:
-					return bridge.fail(-32602, "Expected a dictionary key/value pair")
+					return bridge.fail(
+						Failure.INVALID_PARAMS,
+						"Expected a dictionary key/value pair",
+					)
 
 				var key: Variant = decode(pair[0], depth + 1)
 				var item: Variant = decode(pair[1], depth + 1)
@@ -202,41 +233,47 @@ func _native(value: Variant) -> Variant:
 		if value.begins_with("i:"):
 			var text: String = value.substr(2)
 			if not text.is_valid_int() or str(text.to_int()) != text:
-				return bridge.fail(-32602, "Expected a signed 64-bit integer")
+				return bridge.fail(Failure.INVALID_PARAMS, "Expected a signed 64-bit integer")
 
 		elif (
 			value not in ["f:inf", "f:-inf", "f:nan"]
 			and not value.begins_with("sn:") and not value.begins_with("np:")
 		):
-			return bridge.fail(-32602, "Unknown native scalar encoding")
+			return bridge.fail(Failure.INVALID_PARAMS, "Unknown native scalar encoding")
 
 		return JSON.to_native(value, false)
 
 	if not value is Dictionary or not value.get("type") is String or not value.get("args") is Array:
-		return bridge.fail(-32602, "Expected a supported native value type and args")
+		return bridge.fail(
+			Failure.INVALID_PARAMS,
+			"Expected a supported native value type and args",
+		)
 
 	var type: String = value.type
 	var args: Array = value.args
 	if COMPONENTS.has(type):
 		if args.size() != COMPONENTS[type]:
-			return bridge.fail(-32602, "Incorrect native component count")
+			return bridge.fail(Failure.INVALID_PARAMS, "Incorrect native component count")
 
 	elif PACKED.has(type):
 		if args.size() > 1024 or args.size() % int(PACKED[type]) != 0:
-			return bridge.fail(-32602, "Invalid or oversized packed array")
+			return bridge.fail(Failure.INVALID_PARAMS, "Invalid or oversized packed array")
 
 	else:
-		return bridge.fail(-32602, "Native type is not transferable: " + type)
+		return bridge.fail(Failure.INVALID_PARAMS, "Native type is not transferable: " + type)
 
 	for component: Variant in args:
 		if type == "PackedStringArray":
 			if not component is String:
-				return bridge.fail(-32602, "Expected packed string components")
+				return bridge.fail(Failure.INVALID_PARAMS, "Expected packed string components")
 
 		elif (
 			not (component is float or component is int)
 			or not is_finite(component) or absf(component) > 9007199254740991
 		):
-			return bridge.fail(-32602, "Native components must be finite, JSON-safe numbers")
+			return bridge.fail(
+				Failure.INVALID_PARAMS,
+				"Native components must be finite, JSON-safe numbers",
+			)
 
 	return JSON.to_native(value, false)
