@@ -24,22 +24,23 @@ STAGEHAND_GRAPHICAL=1 npm test
 ```
 
 The runner exports a fixture PCK, copies the template beside it and runs it without
-an editor/debugger connection. Image checks decode actual PNGs
-and inspect known colors before/after real fixture input. The other checks cover
-RPC correlation, references/types/errors, ready subscriptions, input ownership,
-holds/sequences/mouse movement, cancellation/disconnection and addon removal.
-Test files run serially because Godot exports share a temporary `project.binary`
-filename; parallel exporters can corrupt one another's output.
-Network tests also verify the loopback default and opt-in interface/wildcard
-listeners through a non-loopback local IPv4 address, including authentication and
-ordinary RPCs. These checks skip explicitly if no such interface is available;
-they do not require a second machine or change firewall settings.
+an editor/debugger connection. Graphical checks decode PNGs and inspect fixture
+colors before and after input. Test files run serially because parallel Godot
+exports can overwrite shared temporary output.
+
+Network checks use a non-loopback local IPv4 address and skip explicitly if none
+is available. They need no second machine or firewall changes.
 
 `STAGEHAND_REQUIRE_NON_DOTNET=1` additionally verifies that the selected engine has
 no C# support.
 
 `STAGEHAND_KEEP_FIXTURE=1` retains staged files/logs for diagnosis. The test
 suite uses temporary projects; do not point tests at an active game's state.
+
+The fixtures run without an attached editor debugger. When using Stagehand from
+an editor, invalid dynamic source can pause it under normal break-on-error behavior.
+See [runtime GDScript](protocol.md#runtime-gdscript) for execution limits.
+
 Use `node --check` for edited JavaScript. Use [GDQuest’s GDScript Formatter](https://github.com/GDQuest/GDScript-formatter)
 for GDScript formatting and linting (`gdscript-formatter --verify-structure` and
 `gdscript-formatter lint`). The repository's `.editorconfig` sets a 100-column
@@ -47,15 +48,13 @@ target for code. Style checks are distinct from Godot runtime checks.
 
 ## Compatibility and limits
 
-Runtime/release behavior has been checked on macOS arm64 with Godot
-4.8 master build (`960f4db5be16e2f1f7b46f9db7c824c2e0af1035`). Headless Godot
-4.5.2 was checked too; a separate consumer uses shipping MegaDot 4.5.1. These are
-concrete tested builds, not a promise about every engine/platform combination.
-No installed editor/templates are changed by the tests.
+The addon targets Godot 4.5+. Run the suite against the engine and release template
+you intend to ship; the tests do not change installed editors or templates.
 
-Release reflection metadata may omit native argument details. Generic calls expose
-what the engine retains; they do not guarantee semantic success. Screenshots need
-a rendered viewport, and image readback/PNG encoding can block the main thread.
-Injected mouse events are distinct from OS cursor polling. Captured mouse gameplay,
-DPI/scaled or secondary windows, IME, gamepad/touch and non-macOS exports need
-further qualification. Pause/step and replay are not implemented.
+Release builds may omit native argument metadata. Screenshots require a rendered
+viewport, and image readback/PNG encoding can block the main thread. Injected mouse
+events do not move the OS cursor. See [the protocol](protocol.md) for these contracts.
+
+Graphical/export checks have focused on macOS arm64. Captured-mouse gameplay,
+DPI/scaled windows and non-macOS exports need further qualification. Secondary-window
+input routing, IME composition, gamepad/touch, pause/step and replay are not implemented.

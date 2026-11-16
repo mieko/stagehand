@@ -24,9 +24,11 @@ func _ready() -> void:
 
 	var bridge := Stagehand.new()
 	add_child(bridge)
-	bridge.enable_builtins()
 
-	var error := bridge.start(token, 0)
+	var error := bridge.enable_builtins()
+	if error == OK:
+		error = bridge.start(token, 0)
+
 	if error != OK:
 		bridge.queue_free()
 		push_error(error_string(error))
@@ -41,41 +43,36 @@ under an intentionally persistent node if connections should survive scene chang
 Removing it closes connections and releases its synthetic inputs. You may omit
 builtins or enable a selected subset.
 
-`enable_builtins()` enables all five builtin endpoints. Its explicit form is:
-
-```gdscript
-bridge.enable_builtins(["Runtime", "SceneTree", "Object", "Screen", "Input"])
-```
+`enable_builtins()` enables all optional builtin endpoints:
 
 | Name | Exposes |
 | --- | --- |
 | `Runtime` | Engine version, current scene, pause state and timing settings. |
 | `SceneTree` | Current scene/root references and node queries. |
-| `Object` | Property inspection, property reads/writes and method calls on live objects. |
+| `Object` | Property inspection, reads/writes, method calls and arbitrary native-signal subscriptions. |
 | `Screen` | Viewport discovery, dimensions and screenshots. |
 | `Input` | Synthetic keyboard, mouse and InputMap actions, including bounded sequences. |
+| `Script` | Runtime GDScript evaluation; enables conditional input when Input is selected too. |
 
 Pass only the names you want, for example
 `bridge.enable_builtins(["Runtime", "Screen", "Input"])`. Call it once with the
 desired set; later calls do not add or replace endpoints. Pass `[]`, or omit the
 call entirely, to expose `Registry` and the game-owned objects you register yourself.
 
-The token grants powerful control over the running game's normal authority.
-Choose a private, unpredictable launch token. The listener defaults to
-`127.0.0.1`; do not expose the token to untrusted browser code.
+Only enable Object or Script for clients you trust to run code on your machine.
+Input can play the game and operate its menus.
+See [security](docs/security.md) for what each builtin lets a client do.
 
-For remote clients, use Godot's `"*"` convention to listen on all IPv4 and IPv6
-interfaces: `bridge.start(token, 49152, "*")`. Use `"0.0.0.0"` for IPv4 only,
-`"::"` for IPv6 only, or a specific interface IP. Clients connect to the machine's
-hostname or IP. See [remote connections](addons/stagehand/README.md#remote-connections)
-for transport details.
+The listener defaults to loopback. See
+[remote connections](addons/stagehand/README.md#remote-connections) for binding and
+transport options.
 
 ## Connect from JavaScript
 
 Node 22+ provides the required WebSocket implementation; the client has no npm
 dependencies. It's only a few hundred straightforward lines of JavaScript, and
 the WebSocket/JSON-RPC protocol makes it simple to port to another language with
-WebSocket support. Import once and retain the connection:
+WebSocket support. Use the printed port in the URL, then retain the connection:
 
 ```js
 import { connect } from './client/client.mjs';
@@ -106,11 +103,7 @@ for (const object of await registry.invoke('list')) {
 // => …
 ```
 
-Each descriptor includes its handle, label, kind, operations and events. Game-owned
-roots may also declare an optional `version` string. Versions are metadata supplied
-by the implementor; Stagehand does not negotiate or interpret them.
-Core roots each advertise their own API contract version, initially `1.0.0`,
-independent of the Stagehand release or wire protocol version.
+Discovery describes each root's operations, events and optional contract version.
 
 See [usage and registration](addons/stagehand/README.md),
 [wire protocol](docs/protocol.md), [the executable example](client/examples.mjs),
@@ -139,26 +132,15 @@ console.log(await greeter.invoke('hello'));
 // => Hello from Godot!
 ```
 
-Client-side wrappers are optional. For direct operation forwarding, give the
-registered `example` kind a `hello()` method with `forwardMethods`:
-
-```js
-import { connect, forwardMethods } from './client/client.mjs';
-
-const game = await connect('ws://127.0.0.1:49152', {
-  token: process.env.STAGEHAND_TOKEN,
-  wrappers: {
-    example: forwardMethods(['hello']),
-  },
-});
-
-const greeter = await game.findObject('Greeter');
-console.log(await greeter.hello());
-// => Hello from Godot!
-```
-
-See [wrapper factories](client/README.md#wrapper-factories) for details. Builtin
-Input and Screen helpers use the same mechanism.
-
 See [registration details](addons/stagehand/README.md#registering-game-owned-objects)
-for observations, events and object lifetimes.
+for observations, events and object lifetimes, and
+[wrapper factories](client/README.md#wrapper-factories) to add convenient JavaScript
+methods for your object's kind.
+
+## React locally to game state
+
+Select both `Script` and `Input` to hold input until a game-state condition matches,
+without a client round trip per sample. The condition runs as ordinary GDScript
+inside the game, with a simulation-time limit and automatic input release.
+See the [JavaScript example](client/README.md#gdscript-predicates) and
+[conditional-input contract](docs/protocol.md#conditional-input).

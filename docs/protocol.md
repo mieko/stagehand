@@ -1,18 +1,9 @@
 # Stagehand protocol 1
 
 One UTF-8 JSON-RPC 2.0 text message per WebSocket message. The listener is explicit,
-loopback by default, and authenticated. JSONRPC's Godot helpers produce envelopes; this
-addon validates and dispatches its small named-parameter API itself because native
-JSONRPC dispatch does not expose the callback-error contract needed here.
-
-`start(token, port = 0, bind_address = "127.0.0.1")` selects the game listener.
-Godot's `"*"` wildcard listens on all IPv4 and IPv6 interfaces; `"0.0.0.0"` and
-`"::"` select all IPv4 or IPv6 interfaces respectively. A specific interface IP
-restricts the listener to that address.
-The JS client connects to the supplied WebSocket URL without a loopback restriction.
-The addon serves unencrypted `ws://`; encrypted tunnels or TLS termination belong
-to the deployment. Authentication and wire semantics are identical for local and
-remote clients.
+loopback by default, and authenticated. See [connection setup](../addons/stagehand/README.md)
+for binding and transport options. Authentication and wire semantics are identical
+for local and remote clients.
 
 ```json
 {"jsonrpc":"2.0","id":"1","method":"session.hello","params":{"token":"PRIVATE_LAUNCH_TOKEN","protocol":1}}
@@ -23,9 +14,9 @@ clock, physics tick rate, and currently registered endpoint descriptors. A descr
 has `id`, `label`, `kind`, `operations`, `operation_info`, and `events`. An optional
 `version` is an opaque string declared by the game at registration; unversioned
 roots omit it. It is independent of the Stagehand protocol version and involves
-no negotiation. Labels are discovery hints;
-requests target a specific opaque `id`. Authentication and wire-protocol version
-mismatches fail before inspection. Authenticate within five seconds of connection.
+no negotiation. Labels are discovery hints; requests target a specific opaque `id`.
+Authentication and wire-protocol version mismatches fail before inspection.
+Authenticate within five seconds of connection.
 
 ## Wire methods
 
@@ -58,20 +49,20 @@ Subscriptions are installed before acknowledgment. Each connection has independe
 subscriptions. Native signals deliver an array of their emitted arguments, including
 an empty array for a signal with no arguments. Explicit endpoint events deliver
 their published value.
+Declared event names matching native signals are connected automatically. Other
+declared names use `bridge.publish()`. Undeclared native signals require the Object
+builtin; with Object enabled the same subscription method supports arbitrary
+native signals on known references, including unlisted objects. Registry alone
+does not expose signals on its backing Node.
 
 ## Registry
 
 `Registry` is an always-present registered root, with label and kind `Registry`.
 Its ordinary `list({})` operation returns current registered descriptors, including
-itself; observation returns the same list. It is present even without optional
-builtins and shares the bridge's lifetime. `objects.list` uses the same listing
-implementation. Discovery, describe, hello snapshots and registration notifications
-all include an advertised root version when one was supplied.
-
-Core roots (`Registry`, `Runtime`, `SceneTree`, `Object`, `Screen`, and `Input`)
-each advertise API contract version `1.0.0`. Each root's version describes its own
-operations and data contract, independently of the Stagehand release and wire
-protocol versions.
+itself; observation and `objects.list` return the same list. Registry is present
+even without optional builtins and cannot be unregistered. It shares the bridge's
+lifetime. Builtin API versions are advertised through discovery, independently of
+the Stagehand release and wire protocol versions.
 
 ## Optional builtin operations
 
@@ -79,23 +70,59 @@ Builtins are ordinary registered objects, with their names as both label and kin
 (`Input`, `Screen`, etc.), invoked through the same `object.call` method. A game
 may enable any subset or none.
 
+Registry lists the currently exposed roots. See the [addon guide](../addons/stagehand/README.md)
+for builtin selection and setup errors, and [security](security.md) for what each
+builtin lets a client do. When Script and Input are both selected, Input also
+advertises `hold_until` as described under [conditional input](#conditional-input).
+
 | Label | Operations and parameters |
 | --- | --- |
 | `Runtime` | `info()` — engine, display server, scene, pause/time-scale/tick-rate state. Its observer returns the same information. |
 | `SceneTree` | `current()` — root/current scene refs. `query({root?,name?:glob,class?:nativeClass,internal?:false,limit?:100})` — bounded breadth-first live node records with ref, path, native class, groups, parent; includes root if matching. |
 | `Object` | `inspect({target})` — property/method/signal metadata. `get({target,property})`, `set({target,property,value})`, `call({target,method,args?:[]})`. |
 | `Screen` | `viewports()` — up to 100 live viewports. `dimensions({viewport?})` — logical/texture sizes. `capture({viewport?})` — PNG base64, capture ID, viewport, width/height, MIME, timing. Root window is default. |
+| `Script` | `evaluate({source,bindings?:{}})` — compile a RefCounted evaluator and return its synchronous native result. |
 | `Input` | `actions()`, `press(input)`, `release(input)`, `move_mouse({relative?,position?})`, `move_mouse_to({position,duration_ms,from?})`, `scroll({vertical?,horizontal?,position?})`, `sequence({ticks,events,max_wall_ms?})`, `status({action})`, `cancel({action})`. |
 
 Reflected access follows actual live references, including ordinary non-exported
-GDScript fields in a release build. It does not expose arbitrary C++ memory or all
-private engine internals. Metadata is what the selected engine retains: native
-argument names/defaults/type information can be reduced in release builds. Calls
-validate known signatures and argument counts; missing native signature information
-limits validation. A method may report its own failure through logs or return null.
-Generic property getters and method calls may have side effects; null is not a
-universal semantic success signal. Object construction via the value codec is
-disabled. Reflected calls still intentionally have the game's normal authority.
+GDScript fields in a release build. Native argument names/defaults/type information
+can be reduced in release builds. Calls validate known signatures and argument
+counts; missing native signature information limits validation. A method may report
+its own failure through logs or return null.
+Generic property getters and method calls may have side effects. Object construction
+via the value codec is disabled; reflected calls can still reach filesystem and process APIs.
+The registration argument `discoverable` controls listing, not authorization.
+Known handles can use their declared operations/events whether listed or not.
+
+### Runtime GDScript
+
+`Script.evaluate({source,bindings?:{}})` accepts complete GDScript with an
+`evaluate(bindings)` method taking one Dictionary or Variant argument. Its native
+base must derive from RefCounted and its constructor must accept no arguments.
+Source compiles once per request; there is no persistent namespace or script cache.
+The result uses the ordinary value codec, including null and live object references.
+New RefCounted results still need a game owner to outlive the request.
+
+```gdscript
+extends RefCounted
+
+func evaluate(bindings: Dictionary) -> Variant:
+	return bindings.capsule.global_position
+```
+
+Bindings are decoded data and live object references, retained for the call or
+bounded input operation. Their containers are mutable; source owns validity checks
+such as `is_instance_valid`. Returned object references remain live handles,
+not snapshots of object state.
+
+Callbacks must return synchronously. Direct coroutine results are rejected; this
+does not cancel unrelated coroutines or undo side effects. Initialization also
+executes code. Neither compilation nor execution is a sandbox or a preemptible job:
+a non-returning callback blocks the main thread, listener and wall-time cleanup.
+Compilation/signature failures return invalid-parameter errors. Runtime faults
+may log and default-return, including apparently valid results after an inner
+failure; there is no general exception catcher. Invalid source can pause an
+attached editor debugger under its normal break behavior.
 
 ### Values
 
@@ -116,7 +143,8 @@ disabled. Reflected calls still intentionally have the game's normal authority.
   `{"$dictionary":[[key,value],...]}`; JS receives Map.
 
 Supported native values are vectors, rects, transforms, Plane, Quaternion, AABB,
-Basis, Projection, Color, and Godot packed arrays. Native components must be finite numbers within ±(2^53−1) (packed strings must be strings). PackedInt64 elements beyond
+Basis, Projection, Color, and Godot packed arrays. Native components must be finite
+numbers within ±(2^53−1) (packed strings must be strings). PackedInt64 elements beyond
 the safe JSON range are rejected rather than rounded; use an ordinary array of
 BigInts instead. Callable, Signal, RID, arbitrary constructed objects, cycles,
 oversized values, and invalid native encodings fail explicitly.
@@ -160,9 +188,9 @@ the caller controls both fields independently. Coordinates are main-window
 input-event coordinates; relative is copied into both `relative` and
 `screen_relative`. Godot applies the receiving viewport's input transform. A
 Control's global rectangle uses logical viewport units: transform its center with
-the root viewport's `get_final_transform()` to obtain an input position. The STS2
-proof exercises this with a stretched window. Physical desktop coordinates and OS
-cursor movement are separate; no automatic monitor/DPI conversion is supplied.
+the root viewport's `get_final_transform()` to obtain an input position.
+Physical desktop coordinates and OS cursor movement are separate; no automatic
+monitor/DPI conversion is supplied.
 Mouse button events default to the same synthetic position. Motion carries the
 current button mask, so a held button can be dragged.
 
@@ -172,7 +200,7 @@ same main-window event coordinates as mouse movement. Each nonzero axis delivers
 a native wheel-button press/release pair with `factor = abs(amount)`; this is not a
 pixel-distance or touchpad-pan contract. The receiving control determines scroll
 distance. It preserves independently held buttons, shares Input writer ownership,
-and refuses during an active sequence/mouse move. It does not move the OS cursor.
+and refuses during an active scheduled input operation. It does not move the OS cursor.
 The JS convenience is `input.scroll({vertical: 1, position})`.
 
 `move_mouse_to` takes a finite Vector2 destination and 1–60000ms duration. It uses
@@ -186,20 +214,71 @@ No RPC is needed for intermediate positions.
 On macOS, motion/position events reach `_input` and GUI hit testing, while the main
 viewport's `get_mouse_position()` still uses DisplayServer's OS pointer. The addon
 does not warp that pointer. `absolute_cursor_polling:false` and
-`physical_cursor_moved:false` communicate this limitation. Scripts consuming polled
-cursor position need an appropriate game-owned seam; event injection cannot stand
-in for every pointer consumer. Secondary-window routing is not implemented.
+`physical_cursor_moved:false` communicate this limitation. Scripts that poll cursor position
+need game-side support for synthetic positions. Secondary-window routing is not implemented.
 
-Both scheduled operations return `{action,status:"accepted"}` and later publish one
+Scheduled input operations return `{action,status:"accepted"}` and later publish one
 `completed` event containing action identity, terminal status, reason, wall time,
 applied physics ticks, simulation seconds, release status, and final Input state. Mouse results also
-include position, duration, and sample count. Reasons implemented now:
+include position, duration, and sample count. Terminal reasons are:
 `sequence_exhausted`, `destination_events_delivered`, `requested`,
 `connection_closed`, and `wall_time_budget`. They describe execution, not gameplay
 success. `status` retains the active action and latest terminal result only.
 Disconnect cancels active work and releases all connection-owned holds. The client
 rejects waiting promises when the connection or endpoint disappears; it does not
 pretend to know an unreceived terminal outcome.
+
+### Conditional input
+
+With both Script and Input selected, `hold_until` accepts `source`, optional
+`bindings`, `hold` (1–256 existing input descriptors), a positive finite
+`max_simulation_seconds`, optional `response:{ticks,events}`, and optional
+`max_wall_ms` (1–60000, default 10000). Source uses the same evaluator as Script,
+but each call must return `{matched:bool,value:Variant}`. Nothing coerces truthiness.
+
+Preparation and input validation precede acceptance and pressing. Input reserves
+its existing writer for the whole accepted action, refusing independently held
+matching inputs. The first unpaused callback evaluates before pressing: an
+immediate match never presses the initial inputs. Otherwise those inputs remain
+held until the predicate matches, its simulation limit is reached, or work ends.
+
+Evaluation runs at Input's pre-gameplay physics priority (-10000), seeing the
+previous movement result before ordinary default-priority game callbacks. This
+is not post-animation/IK or continuous threshold detection. Simulation time is
+counted at the boundary following each issued interval, including an interval
+just before a pause. While paused, no new interval or predicate evaluation runs.
+A match wins at the first boundary reaching/exceeding the simulation limit;
+otherwise false ends normally. A nonintegral bound can overshoot by one interval.
+
+On match, initial owned holds release before response offset-zero events at that
+same boundary. The optional response uses existing finite sequence rules and
+retains the same action identity. Completion waits for its requested intervals,
+then releases its holds. The simulation limit covers only waiting/holding;
+the independent wall budget covers the whole action, including response and pause.
+Wall expiry suppresses response even after a slow callback returns true.
+
+The usual accepted/completed, status and cancellation interface applies. Reasons:
+`condition_matched`, `simulation_time_limit` (both completed), `predicate_failed`
+or `unsupported_result` (failed), plus existing wall/disconnect/cancel reasons.
+Normal completion is not assertion or gameplay success.
+
+Terminal results add `condition:{matched,value,clock,phase,simulation_seconds}`
+(null if never evaluated), `response_started`, and `response_ticks`. Condition
+phase is `physics_before`; the ordinary clock keeps its coarse physics/process
+phase. The latest observation is retained through response/cancellation, with
+container values captured at evaluation time. If value encoding fails or the
+completion event exceeds the message limit, completion instead reports
+`unsupported_result`, an `error:{code,message}`, and condition metadata without
+the unrepresentable value.
+
+`response_started` means the response phase was entered, not that it finished.
+Overall completion tick/time and Input state are distinct from the condition's
+sample clock/time.
+
+The JS helpers are `input.startHoldUntil(params)` (accepted action plus finished
+promise/cancel/status) and `input.holdUntil(params)` (wait for completion).
+[`gdPredicate`](../client/README.md#gdscript-predicates) optionally generates source;
+raw source and the same wire operations are available to any language.
 
 ### Observations, images, and limits
 
@@ -225,11 +304,8 @@ Tree queries stop at 10000 visited nodes and return at most 1000 matches. The
 viewport list stops at 100 entries. These bounds do not make arbitrary reflected
 calls cheap. Screenshots and expensive getters can block a frame.
 
-There is no background observation poller or unbounded addon event queue. Events
-are sent through bounded WebSocket buffers; delivery/backpressure failure closes
-the connection (1011), explicitly invalidating the stream. Obtain fresh observations
-after reconnecting; no replay, automatic mutation retry, state coalescer, or durable
-event history is provided.
+Event delivery/backpressure failure closes the connection (1011). Obtain fresh
+observations after reconnecting; there is no replay or durable event history.
 
 Errors: JSON-RPC `-32700` parse, `-32600` invalid request, `-32601` unknown method,
 `-32602` invalid params; addon `-32001` auth, `-32002` version, `-32004` stale/unknown

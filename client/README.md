@@ -4,9 +4,8 @@ Import `connect`, `GodotValue` and `RpcError` from `client.mjs`, or import the l
 package `godot-stagehand`. Node 22+ needs no dependency installation.
 Keep a client connected to reuse handles and subscriptions; call `close()` when done.
 
-The client is only a few hundred straightforward lines of JavaScript. The
-WebSocket/JSON-RPC protocol is simple to port to another language with WebSocket
-support; see the [wire protocol](../docs/protocol.md) for message and value formats.
+See the [wire protocol](../docs/protocol.md) for message and value formats when
+writing clients in other languages.
 
 `await game.findObject(label)` looks up the current registered objects and returns
 the first matching object, or `null` if none matches. Use `game.objects()` for
@@ -22,8 +21,8 @@ console.log(roots.map(({label, kind, version}) => ({label, kind, version})));
 ```
 
 The list includes Registry itself and reflects current registrations/removals.
-Descriptors may contain an optional game-supplied `version` string; absence means
-no version was declared. `game.objects()` returns the same discovery information.
+`game.objects()` returns the same descriptors, including any declared API version.
+`game.session` is the initial handshake snapshot, not a live cache.
 
 `await game.builtin(label)` uses the same first-match lookup, caches the handle
 until the object is removed or the connection closes, and throws if it is absent.
@@ -31,16 +30,32 @@ It's a convenience for required named endpoints, including ordinary game-owned
 registrations. Builtins use their names as both label and kind; for example,
 `findObject('Input')` and `builtin('Input')` both use the default `Input` wrapper.
 
-`connect(url, { token })` accepts a local or remote WebSocket URL. The game listener
-defaults to loopback; remote use requires an explicit game-side bind address. Use
-`ws://game-host:PORT` on a trusted network or through an encrypted tunnel, or
-`wss://game-host` when TLS termination fronts the addon. See
-[remote setup](../addons/stagehand/README.md#remote-connections).
+`connect(url, { token })` accepts a local or remote WebSocket URL. Remote use
+requires an explicit [game-side bind address](../addons/stagehand/README.md#remote-connections).
 
-See the [addon usage guide](../addons/stagehand/README.md),
-[protocol](../docs/protocol.md) and [development commands](../docs/development.md).
-From the repository root, `npm test` runs the isolated integration suite.
-No build or dependency installation is hidden in that command.
+See the [addon usage guide](../addons/stagehand/README.md) for game-side setup and
+[development commands](../docs/development.md) for the isolated integration suite.
+
+## Input completion and cancellation
+
+`startSequence()`, `startMouseMove()` and `startHoldUntil()` return acceptance plus
+`finished`, `cancel()` and `getStatus()`. Their shorter forms `sequence()`,
+`moveMouseTo()` and `holdUntil()` await the terminal result directly.
+
+```js
+const accepted = await input.startSequence({
+  ticks: 120,
+  events: [{at_tick: 0, pressed: true, input: {action: 'move_forward'}}],
+});
+// ...other local work...
+await accepted.cancel();
+console.log(await accepted.finished);
+```
+
+Completion describes input execution, not gameplay success. A lost connection or
+removed endpoint rejects `finished` if the terminal result was not received.
+An RPC timeout does not cancel work. The client never retries mutations or
+reconnects automatically; an uncertain action may already have happened.
 
 For ordinary wheel scrolling, `await input.scroll({vertical: 2, position})` delivers
 one press/release wheel pulse with factor 2. Positive factors scroll down/right;
@@ -48,9 +63,68 @@ negative scroll up/left. `horizontal` is optional. Coordinates follow the same
 main-window event convention as mouse motion. This is native event injection,
 not OS cursor movement or guaranteed pixel displacement.
 
-Calling a subscription's cancel function detaches its local event router
-immediately. Its Promise still reports the host unsubscribe acknowledgment or
-failure; a lost acknowledgment does not reinstall local delivery.
+## GDScript predicates
+
+`gdPredicate(predicate, bindings = {})` returns `{source, bindings}` for spreading
+into `input.holdUntil()`, `startHoldUntil()` or the underlying wire operation.
+Select Script and Input in the game first. The helper generates complete GDScript;
+the game compiles and runs it. This example assumes a live `capsule` reference:
+
+```js
+import {gdPredicate} from './client.mjs';
+
+const input = await game.builtin('Input');
+const accepted = await input.startHoldUntil({
+  ...gdPredicate({
+    value: 'capsule.global_position.y',
+    matched: 'value >= 1.5',
+  }, {capsule}),
+  hold: [{key: 'W', physical: true}],
+  max_simulation_seconds: 3,
+});
+const result = await accepted.finished;
+console.log(result.reason, result.condition?.value);
+```
+
+Use `input.holdUntil(params)` when you only need the final result.
+
+The object form samples `value` once, then uses that local in `matched`. The
+string form `gdPredicate('capsule.position.y >= 1.5', {capsule})` returns matched
+with `value:null`, because no separate observation was requested. The game's
+predicate contract requires a real bool; the helper does not coerce truthiness.
+
+Named bindings become typed local variables inside each evaluator invocation.
+Values remain normal native bindings, never source literals. Invalid identifiers,
+GDScript reserved words and generated-name conflicts (`bindings`, `evaluate`, and
+object-form `value`) are rejected. The engine remains the source compiler and
+checks game-specific symbols. Use raw `{source,bindings}` for more involved
+evaluators or other binding keys.
+
+See [the wire contract](../docs/protocol.md#conditional-input) for response sequences,
+budgets, snapshots, cleanup and synchronous execution limits.
+
+## Subscribing to native signals
+
+`remote.subscribe(name, listener)` supports both declared endpoint events and native
+signals. Without the Object builtin, the game must declare that name in the
+endpoint's `events`; matching native signals are connected automatically. With
+Object enabled, clients can inspect and subscribe to arbitrary native signals on
+known objects. `remote.inspect()`, `get(property)`, `set(property, value)` and
+`call(method, ...args)` also require Object and provide native inspection and calls.
+See [security](../docs/security.md) for builtin permissions.
+
+Install the subscription before triggering the operation:
+
+```js
+const stop = await object.subscribe('changed', (event) => console.log(event.value));
+await object.invoke('increment', {amount: 1});
+await stop();
+```
+
+Subscribe resolves when both ends are ready. Native signals deliver an array of
+arguments; published events carry the supplied value. Calling `stop()` detaches
+local delivery immediately; its Promise reports the host's unsubscribe acknowledgment
+or failure.
 
 ## Wrapper factories
 
@@ -76,7 +150,7 @@ console.log(await dingus.hello());
 On the Godot side, register that object's `kind` as `"Dingus"`. Its label
 (`"My dingus"`) is independent of its type. The factory receives a generic
 `RemoteObject` and returns whatever object you want callers to use: a class
-instance or a small facade, with no inheritance requirement.
+instance or a plain object, with no inheritance requirement.
 Each returned wrapper represents one remote object on one connection. If caching
 wrappers, keep a separate cache per connection keyed by object identity.
 
@@ -102,15 +176,13 @@ one named-parameter object and returns `remote.invoke(name, params)` unchanged;
 omitting parameters sends an empty object. Results, errors and native values follow
 the ordinary client behavior. The underlying `RemoteObject` is available as
 `.remote` for observations, subscriptions and other generic operations. Names are
-copied when the factory is created and must be nonempty strings; `remote` is reserved
-for the handle and `then` to prevent the wrapper being treated as a Promise.
+required to be nonempty strings; `remote` and `then` are reserved.
 Operations are not discovered or validated against the endpoint until invoked.
 Use a custom factory when methods need argument or result conversion.
 
 The same factory path handles discovery, returned references, nested arrays/maps,
-observations and events. Wrapped objects can also be passed back as RPC arguments;
-the client encodes their original references. Wrapping needs no extra RPCs. Types
-without a factory remain ordinary `RemoteObject`s.
+observations and events. Wrapped objects can also be passed back as RPC arguments.
+Types without a factory remain ordinary `RemoteObject`s.
 
 Input and Screen helpers live on `InputObject` and `ScreenObject`, supplied through
 the default `Input` and `Screen` factories. Your entries override or extend those
