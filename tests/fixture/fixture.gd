@@ -33,7 +33,7 @@ class Probe extends Node:
 		return true
 
 
-	func spawn(_params: Dictionary) -> String:
+	func spawn(params: Dictionary) -> String:
 		var other := Probe.new()
 		other.name = "C"
 		other.bridge = bridge
@@ -45,6 +45,9 @@ class Probe extends Node:
 			{ "increment": other.increment, "remove": other.remove },
 			other.observe,
 			["changed"],
+			{ },
+			true,
+			params.get("version", ""),
 		)
 
 		return other.handle

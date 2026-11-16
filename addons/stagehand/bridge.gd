@@ -25,6 +25,7 @@ var _builtins: RefCounted
 var _request_peer: WebSocketPeer
 var _scene_id := 0
 var _world_generation := 0
+var _registry_handle := ""
 
 
 func _init() -> void:
@@ -32,6 +33,18 @@ func _init() -> void:
 	_instance = Crypto.new().generate_random_bytes(16).hex_encode()
 	process_mode = Node.PROCESS_MODE_ALWAYS
 	set_process(false)
+
+	_registry_handle = register_object(
+		self,
+		"Registry",
+		"Registry",
+		{ "list": _list_objects },
+		_list_objects,
+		[],
+		{ },
+		true,
+		"1.0.0",
+	)
 
 
 func start(token: String, port: int = 0, bind_address: String = "127.0.0.1") -> Error:
@@ -94,6 +107,7 @@ func register_object(
 	events: PackedStringArray = [],
 	operation_info: Dictionary = { },
 	registered: bool = true,
+	version: String = "",
 ) -> String:
 	_next_object += 1
 	var handle := "%s:%d" % [_instance, _next_object]
@@ -106,6 +120,7 @@ func register_object(
 		"events": events,
 		"registered": registered,
 		"operation_info": operation_info,
+		"version": version,
 		"native_signals": { },
 	}
 
@@ -155,6 +170,9 @@ func resolve_object(handle: Variant) -> Variant:
 
 
 func unregister_object(handle: String) -> void:
+	if handle == _registry_handle:
+		return
+
 	if _objects.has(handle):
 		_disconnect_signals(_objects[handle])
 
@@ -405,12 +423,7 @@ func _dispatch(peer: WebSocketPeer, method: String, params: Dictionary) -> Varia
 		return Failure.new(-32001, "Authenticate with session.hello first")
 
 	if method == "objects.list":
-		var objects: Array = []
-		for handle: String in _objects:
-			if _objects[handle].target.get_ref() != null and _objects[handle].registered:
-				objects.append(_describe(handle))
-
-		return objects
+		return _list_objects()
 
 	if method == "object.unsubscribe":
 		var removed: bool = state.subscriptions.erase(params.get("subscription", ""))
@@ -471,10 +484,19 @@ func _dispatch(peer: WebSocketPeer, method: String, params: Dictionary) -> Varia
 	return Failure.new(JSONRPC.INTERNAL_ERROR, "Dispatch failed")
 
 
+func _list_objects(_params: Dictionary = { }) -> Array[Dictionary]:
+	var objects: Array[Dictionary] = []
+	for handle: String in _objects:
+		if _objects[handle].target.get_ref() != null and _objects[handle].registered:
+			objects.append(_describe(handle))
+
+	return objects
+
+
 func _describe(handle: String) -> Dictionary:
 	var entry: Dictionary = _objects[handle]
 
-	return {
+	var description := {
 		"id": handle,
 		"label": entry.label,
 		"kind": entry.kind,
@@ -482,6 +504,10 @@ func _describe(handle: String) -> Dictionary:
 		"operation_info": entry.operation_info,
 		"events": entry.events,
 	}
+	if not entry.version.is_empty():
+		description["version"] = entry.version
+
+	return description
 
 
 func _send(peer: WebSocketPeer, value: Variant) -> void:

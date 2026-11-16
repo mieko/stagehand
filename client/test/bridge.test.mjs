@@ -49,6 +49,107 @@ test('handshake describes the live instance and discovers registered objects', a
   console.log('Runtime features:', features);
 });
 
+test('core roots advertise their API versions', async () => {
+  const registry = await client.builtin('Registry');
+  const roots = await registry.invoke('list');
+  const versions = {
+    Registry: '1.0.0',
+    Runtime: '1.0.0',
+    SceneTree: '1.0.0',
+    Object: '1.0.0',
+    Screen: '1.0.0',
+    Input: '1.0.0',
+  };
+
+  for (const [label, version] of Object.entries(versions)) {
+    assert.equal(roots.find((object) => object.label === label).version, version);
+    assert.equal(client.session.objects.find((object) => object.label === label).version, version);
+
+    const root = await client.builtin(label);
+
+    assert.equal((await root.describe()).version, version);
+  }
+});
+
+test('Registry lists current roots through ordinary object operations', async () => {
+  const registry = await client.builtin('Registry');
+  const descriptor = await registry.describe();
+
+  assert.equal(descriptor.kind, 'Registry');
+  assert.ok(descriptor.operations.includes('list'));
+  assert.ok(client.session.objects.some((object) => object.id === registry.id));
+
+  const roots = await registry.invoke('list');
+
+  assert.deepEqual(roots, await client.objects());
+  assert.deepEqual((await registry.observe()).value, roots);
+  assert.equal(roots.find((object) => object.label === 'Registry').id, registry.id);
+
+  await registry.call('unregister_object', registry.id);
+
+  assert.ok((await registry.invoke('list')).some((object) => object.id === registry.id));
+});
+
+test('Registry remains available with optional builtins disabled', async () => {
+  const isolated = await launchFixture({ builtins: [] });
+  const connection = await connect(isolated.url, { token: isolated.token });
+
+  try {
+    const registry = await connection.builtin('Registry');
+    const roots = await registry.invoke('list');
+
+    assert.deepEqual(roots.map((object) => object.label), ['Registry', 'A', 'B']);
+    assert.equal(await connection.findObject('Input'), null);
+    assert.equal(roots[0].version, '1.0.0');
+    assert.ok(roots
+      .filter((object) => object.kind === 'probe')
+      .every((object) => !Object.hasOwn(object, 'version')));
+  } finally {
+    connection.close();
+    await isolated.stop();
+  }
+});
+
+test('Registry reports optional game versions and follows live root lifetimes', async () => {
+  const registry = await client.builtin('Registry');
+  const added = new Promise((resolve) => {
+    const listener = (item) => {
+      if (item.method === 'objects.added' && item.params.label === 'C') {
+        client.off('notification', listener);
+        resolve(item.params);
+      }
+    };
+
+    client.on('notification', listener);
+  });
+  const id = await client.object(objects[0].id).invoke('spawn', { version: 'preview-7' });
+  const root = client.object(id);
+
+  try {
+    assert.equal((await added).version, 'preview-7');
+    assert.equal((await root.describe()).version, 'preview-7');
+
+    const roots = await registry.invoke('list');
+
+    assert.equal(roots.find((object) => object.id === id).version, 'preview-7');
+    assert.equal(roots.find((object) => object.label === 'Registry').id, registry.id);
+    assert.ok(!Object.hasOwn(roots.find((object) => object.label === 'A'), 'version'));
+    assert.deepEqual(roots, await client.objects());
+
+    const connection = await connect(url, { token });
+
+    try {
+      assert.equal(connection.session.objects.find((object) => object.id === id).version, 'preview-7');
+    } finally {
+      connection.close();
+    }
+  } finally {
+    await root.invoke('remove');
+  }
+
+  assert.ok(!(await registry.invoke('list')).some((object) => object.id === id));
+});
+
 test('findObject returns the first current label match or null', async () => {
   const a = await client.findObject('A');
 

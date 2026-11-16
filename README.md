@@ -58,7 +58,7 @@ bridge.enable_builtins(["Runtime", "SceneTree", "Object", "Screen", "Input"])
 Pass only the names you want, for example
 `bridge.enable_builtins(["Runtime", "Screen", "Input"])`. Call it once with the
 desired set; later calls do not add or replace endpoints. Pass `[]`, or omit the
-call entirely, to expose only the game-owned objects you register yourself.
+call entirely, to expose `Registry` and the game-owned objects you register yourself.
 
 The token grants powerful control over the running game's normal authority.
 Choose a private, unpredictable launch token. The listener defaults to
@@ -91,7 +91,26 @@ console.log(await tree.invoke('current'));
 ```
 
 An environment without a global WebSocket can supply `{WebSocket: constructor}`.
-Ordinary Node scripts, persistent JS sessions and bots use the same API;
+Ordinary Node scripts, persistent JS sessions and bots use the same API.
+
+`Registry` is an always-present root for discovery, independent of optional builtins:
+
+```js
+const registry = await game.builtin('Registry');
+
+for (const object of await registry.invoke('list')) {
+  console.log(object.label, object.kind);
+}
+// => Registry Registry
+// => Runtime Runtime
+// => …
+```
+
+Each descriptor includes its handle, label, kind, operations and events. Game-owned
+roots may also declare an optional `version` string. Versions are metadata supplied
+by the implementor; Stagehand does not negotiate or interpret them.
+Core roots each advertise their own API contract version, initially `1.0.0`,
+independent of the Stagehand release or wire protocol version.
 
 See [usage and registration](addons/stagehand/README.md),
 [wire protocol](docs/protocol.md), [the executable example](client/examples.mjs),

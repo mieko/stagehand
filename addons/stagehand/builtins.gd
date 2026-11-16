@@ -18,6 +18,10 @@ func install(names: PackedStringArray) -> void:
 			"Runtime",
 			{ "info": runtime_info },
 			runtime_observation,
+			[],
+			{ },
+			true,
+			"1.0.0",
 		)
 
 	if "SceneTree" in names:
@@ -26,6 +30,11 @@ func install(names: PackedStringArray) -> void:
 			"SceneTree",
 			"SceneTree",
 			{ "current": current, "query": query },
+			Callable(),
+			[],
+			{ },
+			true,
+			"1.0.0",
 		)
 
 	if "Object" in names:
@@ -39,6 +48,11 @@ func install(names: PackedStringArray) -> void:
 				"set": set_property,
 				"call": call_method,
 			},
+			Callable(),
+			[],
+			{ },
+			true,
+			"1.0.0",
 		)
 
 	if "Screen" in names:
@@ -47,6 +61,11 @@ func install(names: PackedStringArray) -> void:
 			"Screen",
 			"Screen",
 			{ "viewports": viewports, "dimensions": dimensions, "capture": capture },
+			Callable(),
+			[],
+			{ },
+			true,
+			"1.0.0",
 		)
 
 

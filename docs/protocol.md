@@ -20,9 +20,12 @@ remote clients.
 
 The result contains protocol, random running-instance identity, engine version,
 clock, physics tick rate, and currently registered endpoint descriptors. A descriptor
-has `id`, `label`, `kind`, `operations`, `operation_info`, and `events`. Labels are discovery hints;
-requests target a specific opaque `id`. Authentication and version mismatches fail
-before inspection. Authenticate within five seconds of connection.
+has `id`, `label`, `kind`, `operations`, `operation_info`, and `events`. An optional
+`version` is an opaque string declared by the game at registration; unversioned
+roots omit it. It is independent of the Stagehand protocol version and involves
+no negotiation. Labels are discovery hints;
+requests target a specific opaque `id`. Authentication and wire-protocol version
+mismatches fail before inspection. Authenticate within five seconds of connection.
 
 ## Wire methods
 
@@ -55,6 +58,20 @@ Subscriptions are installed before acknowledgment. Each connection has independe
 subscriptions. Native signals deliver an array of their emitted arguments, including
 an empty array for a signal with no arguments. Explicit endpoint events deliver
 their published value.
+
+## Registry
+
+`Registry` is an always-present registered root, with label and kind `Registry`.
+Its ordinary `list({})` operation returns current registered descriptors, including
+itself; observation returns the same list. It is present even without optional
+builtins and shares the bridge's lifetime. `objects.list` uses the same listing
+implementation. Discovery, describe, hello snapshots and registration notifications
+all include an advertised root version when one was supplied.
+
+Core roots (`Registry`, `Runtime`, `SceneTree`, `Object`, `Screen`, and `Input`)
+each advertise API contract version `1.0.0`. Each root's version describes its own
+operations and data contract, independently of the Stagehand release and wire
+protocol versions.
 
 ## Optional builtin operations
 

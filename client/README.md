@@ -12,6 +12,19 @@ support; see the [wire protocol](../docs/protocol.md) for message and value form
 the first matching object, or `null` if none matches. Use `game.objects()` for
 descriptors and `game.object(id)` when you already have a specific handle.
 
+Every bridge exposes a `Registry` root, including when optional builtins are off:
+
+```js
+const registry = await game.builtin('Registry');
+const roots = await registry.invoke('list');
+
+console.log(roots.map(({label, kind, version}) => ({label, kind, version})));
+```
+
+The list includes Registry itself and reflects current registrations/removals.
+Descriptors may contain an optional game-supplied `version` string; absence means
+no version was declared. `game.objects()` returns the same discovery information.
+
 `await game.builtin(label)` uses the same first-match lookup, caches the handle
 until the object is removed or the connection closes, and throws if it is absent.
 It's a convenience for required named endpoints, including ordinary game-owned

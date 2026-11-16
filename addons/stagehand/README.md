@@ -44,8 +44,10 @@ bridge.enable_builtins(["Runtime", "SceneTree", "Object", "Screen", "Input"])
 These strings select the builtin endpoints to register. Pass a subset such as
 `["Runtime", "Screen", "Input"]` to expose only those endpoints. Call this method
 once with the desired set; subsequent calls do nothing. Passing `[]`, or omitting
-the call, leaves builtin endpoints disabled; your game-owned registrations still
-work. The [protocol reference](../../docs/protocol.md#optional-builtin-operations)
+the call, leaves builtin endpoints disabled. `Registry` remains available, along
+with your game-owned registrations. Its `list` operation returns the current
+registered-root descriptors, including itself; its observation returns the same
+list. The [protocol reference](../../docs/protocol.md#optional-builtin-operations)
 lists each builtin's operations.
 
 The token grants powerful developer control, especially with Object enabled:
@@ -181,6 +183,9 @@ var handle := bridge.register_object(
 	{ "increment": counter.increment },
 	counter.observe,
 	["changed"],
+	{ }, # Optional operation descriptions.
+	true, # Registered root; false is used internally for reflected references.
+	"1.0", # Optional game-owned contract version.
 )
 
 bridge.publish(handle, "changed", counter.count)
@@ -192,16 +197,24 @@ bridge.publish(handle, "changed", counter.count)
 `counter.observe()` returns its current state. See the standalone fixture for a
 complete working example of both callbacks and immediate event publication.
 
-An optional final `operation_info` Dictionary supplies game-owned argument/return
+The optional `operation_info` Dictionary supplies game-owned argument/return
 descriptions in discovery, independent of native release reflection. It describes
 the operations; their callbacks still own validation.
+
+The trailing `version` string defaults to empty, which omits it from the descriptor.
+Supply a version when your game wants clients to identify an exposed contract.
+Stagehand treats it as an opaque string: there is no required version format,
+comparison, negotiation or protocol-version change. It describes the root's API,
+independently of the running game's build or the object's instance handle.
 
 Node removal invalidates its handles and subscriptions. Other Objects use weak
 references and are pruned once freed. Registration retains operation callbacks;
 when those retain a RefCounted target, unregister it explicitly at its owner's
 lifecycle boundary. Handles are scoped to this running bridge instance, not durable
 NodePaths or JavaScript numbers. Reflection can follow unregistered live nodes and
-resources too; only explicitly registered endpoints appear in `objects.list`.
+resources too; `Registry.list` includes only registered roots. `objects.list`
+returns the same descriptors for existing clients. Registry is tied to the bridge's
+lifetime and cannot be removed by `unregister_object`.
 
 Game logic and asynchronous semantic actions belong to game-owned endpoints.
 Character selection/ownership, navigation, placement, camera control, MCP, debugger

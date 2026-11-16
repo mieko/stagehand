@@ -39,6 +39,9 @@ func _ready() -> void:
 		},
 		observe_input,
 		["completed"],
+		{ },
+		true,
+		"1.0.0",
 	)
 	bridge.connection_closed.connect(_disconnected)
 
