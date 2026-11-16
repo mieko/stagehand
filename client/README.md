@@ -67,6 +67,33 @@ instance or a small facade, with no inheritance requirement.
 Each returned wrapper represents one remote object on one connection. If caching
 wrappers, keep a separate cache per connection keyed by object identity.
 
+For methods that simply forward named parameters, use `forwardMethods`:
+
+```js
+import { connect, forwardMethods } from './client.mjs';
+
+const game = await connect(url, {
+  token,
+  wrappers: {
+    example: forwardMethods(['hello']),
+  },
+});
+
+const greeter = await game.builtin('Greeter');
+console.log(await greeter.hello());
+console.log(await greeter.remote.describe());
+```
+
+`forwardMethods(names)` returns a wrapper factory. Each generated method accepts
+one named-parameter object and returns `remote.invoke(name, params)` unchanged;
+omitting parameters sends an empty object. Results, errors and native values follow
+the ordinary client behavior. The underlying `RemoteObject` is available as
+`.remote` for observations, subscriptions and other generic operations. Names are
+copied when the factory is created and must be nonempty strings; `remote` is reserved
+for the handle and `then` to prevent the wrapper being treated as a Promise.
+Operations are not discovered or validated against the endpoint until invoked.
+Use a custom factory when methods need argument or result conversion.
+
 The same factory path handles discovery, returned references, nested arrays/maps,
 observations and events. Wrapped objects can also be passed back as RPC arguments;
 the client encodes their original references. Wrapping needs no extra RPCs. Types

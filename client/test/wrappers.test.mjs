@@ -1,6 +1,6 @@
 import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { connect, InputObject, RemoteObject, ScreenObject } from '../client.mjs';
+import { connect, InputObject, forwardMethods, RemoteObject, ScreenObject } from '../client.mjs';
 import { launchFixture } from './fixture.mjs';
 
 let fixture;
@@ -25,6 +25,59 @@ class Dingus {
     return this.remote.invoke('echo', { value });
   }
 }
+
+test('operation wrappers forward calls, results and errors through ordinary remote handles', async () => {
+  const game = await connect(fixture.url, {
+    token: fixture.token,
+    wrappers: { probe: forwardMethods(['echo', 'spawn', 'remove', 'missing']) },
+  });
+  let child;
+
+  try {
+    const probe = await game.builtin('A');
+    assert.ok(probe.remote instanceof RemoteObject);
+
+    const returned = await probe.echo({ value: { self: probe, number: 9007199254740993n } });
+    assert.equal(returned.self.remote.id, probe.remote.id);
+    assert.equal(returned.number, 9007199254740993n);
+    assert.equal(await returned.self.echo({ value: 'nested' }), 'nested');
+    assert.equal(await probe.echo(), null);
+    await assert.rejects(probe.missing(), { code: -32601 });
+    assert.equal(await probe.echo({ value: 'after error' }), 'after error');
+
+    child = game.object(await probe.spawn());
+    const remove = child.remove;
+    await remove();
+    await assert.rejects(child.remote.observe(), { code: -32004 });
+    child = null;
+  } finally {
+    if (child) await child.remove();
+    game.close();
+  }
+});
+
+test('operation wrapper factories retain their own method selection', () => {
+  const names = ['echo'];
+  const factory = forwardMethods(names);
+  names[0] = 'changed';
+  const expected = Promise.resolve(42);
+  const params = { value: 42 };
+  const remote = {
+    invoke(method, received) {
+      assert.equal(method, 'echo');
+      assert.equal(received, params);
+      return expected;
+    },
+  };
+
+  assert.equal(factory(remote).echo(params), expected);
+});
+
+test('operation wrappers reject invalid names and names reserved by the facade or promises', () => {
+  for (const names of ['echo', [null], [''], ['remote'], ['then']]) {
+    assert.throws(() => forwardMethods(names), TypeError);
+  }
+});
 
 test('standard endpoints use their registered kinds through ordinary discovery and references', async () => {
   const game = await connect(fixture.url, { token: fixture.token });

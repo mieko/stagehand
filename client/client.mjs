@@ -145,6 +145,23 @@ export class RemoteObject {
   }
 }
 
+export function forwardMethods(names) {
+  if (!Array.isArray(names)) {
+    throw new TypeError('Expected an array of operation names');
+  }
+
+  const methods = [...names];
+  if (methods.some((name) =>
+    typeof name !== 'string' || !name || name === 'remote' || name === 'then')) {
+    throw new TypeError('Expected operation names other than "remote" or "then"');
+  }
+
+  return (remote) => Object.fromEntries([
+    ['remote', remote],
+    ...methods.map((name) => [name, (params) => remote.invoke(name, params)]),
+  ]);
+}
+
 export class InputObject extends RemoteObject {
   constructor(remote) {
     super(remote.client, remote.id);

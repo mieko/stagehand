@@ -120,16 +120,16 @@ console.log(await greeter.invoke('hello'));
 // => Hello from Godot!
 ```
 
-Client-side wrappers are optional. As an alternative to the plain connection above,
-you can give the registered `example` kind a custom `hello()` method:
+Client-side wrappers are optional. For direct operation forwarding, give the
+registered `example` kind a `hello()` method with `forwardMethods`:
 
 ```js
+import { connect, forwardMethods } from './client/client.mjs';
+
 const game = await connect('ws://127.0.0.1:49152', {
   token: process.env.STAGEHAND_TOKEN,
   wrappers: {
-    example: remote => ({
-      hello: () => remote.invoke('hello'),
-    }),
+    example: forwardMethods(['hello']),
   },
 });
 
