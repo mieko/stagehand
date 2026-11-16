@@ -1,5 +1,7 @@
 import { EventEmitter } from 'node:events';
 
+export {gdPredicate} from './gdscript.mjs';
+
 const wrappedObjects = new WeakMap();
 
 export class GodotValue {
@@ -175,6 +177,10 @@ export class InputObject extends RemoteObject {
     return this.#startAction('move_mouse_to', params);
   }
 
+  async startHoldUntil(params) {
+    return this.#startAction('hold_until', params);
+  }
+
   async #startAction(method, params) {
     let resolve, reject, action;
     const early = [];
@@ -237,6 +243,10 @@ export class InputObject extends RemoteObject {
 
   async moveMouseTo(params) {
     return (await this.startMouseMove(params)).finished;
+  }
+
+  async holdUntil(params) {
+    return (await this.startHoldUntil(params)).finished;
   }
 
   async scroll(params) {
