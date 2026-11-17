@@ -23,6 +23,10 @@ STAGEHAND_RELEASE=/path/to/release-template \
 STAGEHAND_GRAPHICAL=1 npm test
 ```
 
+Recorder memory measurements require an engine exposing static-memory counters;
+release engines without them report that measurement as unavailable. Capture,
+encoding, lifecycle and retrieval checks still run.
+
 The runner exports a fixture PCK, copies the template beside it and runs it without
 an editor/debugger connection. Graphical checks decode PNGs and inspect fixture
 colors before and after input. Test files run serially because parallel Godot

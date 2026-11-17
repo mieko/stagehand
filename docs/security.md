@@ -1,7 +1,7 @@
 # Security
 
 Choose builtins according to what you want a connected client to be able to do.
-**Enable Object or Script only for clients you trust to run code on your machine.**
+**Enable Object, Script or PropertyRecorder only for clients you trust to run code on your machine.**
 They can read and write the same files and start the same programs that the game can,
 subject to the game's operating-system permissions.
 
@@ -16,6 +16,7 @@ subject to the game's operating-system permissions.
 | Input | Press keys and mouse buttons, send mouse motion and wheel events, and trigger InputMap actions. This can play the game and operate its menus. |
 | Object | Read and change properties, call methods and listen to native signals on reachable game objects. Treat this as letting the client run code. |
 | Script | Run supplied GDScript inside the game. |
+| PropertyRecorder | Read properties and invoke supplied method names on live references; run supplied readings when Script is enabled too. A "getter" can have side effects. Treat this as letting the client run code. |
 
 Runtime, SceneTree and Screen provide inspection, not general property writes,
 method calls or scripting. They can still reveal information you intended to
@@ -26,15 +27,16 @@ Input is not necessarily harmless. If your game has a debug console, mod loader
 or file-writing UI that accepts synthetic input, a client may be able to operate
 it. Check what those controls can do before giving Input to an untrusted client.
 
-Object and Script both let a client execute code. Object can reach script
-resources and call game/engine methods; Script makes execution direct. Disabling
-SceneTree does not make Object safe: Object can traverse the tree itself.
+Object and PropertyRecorder can reach script resources and call game/engine
+methods; Script makes execution direct. PropertyRecorder's method selector is
+not restricted to pure getters. Disabling SceneTree does not make these safe:
+they can traverse the tree themselves.
 
 ## Select the builtins deliberately
 
 Creating a bridge installs Registry. Nothing listens until you call `start()`.
-Calling `enable_builtins()` with no arguments enables **all six optional builtins**,
-including Object and Script. That is appropriate for a trusted developer or bot.
+Calling `enable_builtins()` with no arguments enables **all optional builtins**,
+including Object, Script and PropertyRecorder. That is appropriate for a trusted developer or bot.
 
 Pass an explicit list to expose less:
 
@@ -53,7 +55,7 @@ do not isolate clients that can execute code inside the same game process.
 
 ## Expose your own operations
 
-Without Object or Script, returning a node reference does not let the client call
+Without Object, Script or PropertyRecorder, returning a node reference does not let the client call
 arbitrary methods on it. Clients can call only the operations you register.
 They cannot create arbitrary Godot Objects through the value encoding.
 

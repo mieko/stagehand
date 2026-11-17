@@ -1,18 +1,22 @@
 extends RefCounted
 
 const Failure = preload("failure.gd")
+const ObjectAccess = preload("object_access.gd")
+const PropertyRecorder = preload("property_recorder.gd")
 const InputEndpoint = preload("input.gd")
 const ScriptEndpoint = preload("script.gd")
-const NAMES := ["Runtime", "SceneTree", "Object", "Screen", "Input", "Script"]
+const NAMES := ["Runtime", "SceneTree", "Object", "Screen", "Input", "Script", "PropertyRecorder"]
 
 var bridge: Node
 var native_signals_enabled := false
 var _next_capture := 0
 var _scripts: RefCounted
+var _access: RefCounted
 
 
 func _init(owner: Node) -> void:
 	bridge = owner
+	_access = ObjectAccess.new(owner)
 
 
 func install(names: PackedStringArray) -> void:
@@ -49,10 +53,10 @@ func install(names: PackedStringArray) -> void:
 			"Object",
 			"Object",
 			{
-				"inspect": inspect_object,
-				"get": get_property,
-				"set": set_property,
-				"call": call_method,
+				"inspect": _access.inspect_object,
+				"get": _access.get_property,
+				"set": _access.set_property,
+				"call": _access.call_method,
 			},
 			Callable(),
 			[],
@@ -92,6 +96,12 @@ func install(names: PackedStringArray) -> void:
 		var endpoint := InputEndpoint.new(bridge, _scripts)
 		endpoint.name = "InputEndpoint"
 		bridge.add_child(endpoint)
+
+	if "PropertyRecorder" in names:
+		var recorder := PropertyRecorder.new()
+		recorder.name = &"PropertyRecorder"
+		bridge.add_child(recorder)
+		recorder.install(bridge, _scripts)
 
 
 func runtime_info(_params: Dictionary) -> Dictionary:
@@ -146,124 +156,6 @@ func query(params: Dictionary) -> Variant:
 		queue.append_array(node.get_children(bool(params.get("internal", false))))
 
 	return { "nodes": nodes, "truncated": not queue.is_empty() }
-
-
-func inspect_object(params: Dictionary) -> Variant:
-	var target: Variant = params.get("target")
-	if not target is Object or not is_instance_valid(target):
-		return bridge.fail(Failure.INVALID_PARAMS, "Expected a live target reference")
-
-	return {
-		"class": target.get_class(),
-		"properties": target.get_property_list(),
-		"methods": target.get_method_list(),
-		"signals": target.get_signal_list(),
-	}
-
-
-func _property(params: Dictionary) -> Variant:
-	var target: Variant = params.get("target")
-	if (
-		not target is Object or not is_instance_valid(target)
-		or not params.get("property") is String
-	):
-		return bridge.fail(Failure.INVALID_PARAMS, "Expected a live target and property name")
-
-	for entry: Dictionary in target.get_property_list():
-		if entry.name == params.property:
-			return entry
-
-	return bridge.fail(Failure.INVALID_PARAMS, "Unknown property: " + params.property)
-
-
-func get_property(params: Dictionary) -> Variant:
-	var property: Variant = _property(params)
-	if property is Failure:
-		return property
-
-	return params.target.get(params.property)
-
-
-func set_property(params: Dictionary) -> Variant:
-	var property: Variant = _property(params)
-	if property is Failure:
-		return property
-
-	if not params.has("value"):
-		return bridge.fail(Failure.INVALID_PARAMS, "Missing property value")
-
-	var error: Variant = _check_type(params.value, property)
-	if error is Failure:
-		return error
-
-	params.target.set(params.property, params.value)
-
-	return params.target.get(params.property)
-
-
-func call_method(params: Dictionary) -> Variant:
-	var target: Variant = params.get("target")
-	var method: Variant = params.get("method")
-	var args: Variant = params.get("args", [])
-	if (
-		not target is Object or not is_instance_valid(target)
-		or not method is String or not args is Array
-	):
-		return bridge.fail(
-			Failure.INVALID_PARAMS,
-			"Expected a live target, method name, and argument array",
-		)
-
-	if not target.has_method(method):
-		return bridge.fail(Failure.METHOD_NOT_FOUND, "Unknown reflected method")
-
-	for info: Dictionary in target.get_method_list():
-		if info.name == method and not (int(info.get("flags", 0)) & METHOD_FLAG_VARARG):
-			var maximum: int = Callable(target, method).get_argument_count()
-			var complete: bool = info.get("args", []).size() == maximum
-			var minimum: int = maximum - info.get("default_args", []).size() if complete else 0
-			if args.size() < minimum or args.size() > maximum:
-				return bridge.fail(Failure.INVALID_PARAMS, "Incorrect argument count")
-
-			if complete:
-				for index: int in args.size():
-					var error: Variant = _check_type(args[index], info.args[index])
-					if error is Failure:
-						return error
-
-			break
-
-	return target.callv(method, args)
-
-
-func _check_type(value: Variant, info: Dictionary) -> Variant:
-	var expected: int = info.get("type", TYPE_NIL)
-	var class_name_hint: String = info.get("class_name", "")
-	if (
-		expected == TYPE_OBJECT and value is Object
-		and ClassDB.class_exists(class_name_hint) and not value.is_class(class_name_hint)
-	):
-		return bridge.fail(Failure.INVALID_PARAMS, "Expected an object of class " + class_name_hint)
-
-	if expected == TYPE_NIL or typeof(value) == expected:
-		return null
-
-	if (
-		expected in [TYPE_INT, TYPE_FLOAT]
-		and typeof(value) in [TYPE_INT, TYPE_FLOAT] and is_finite(value)
-	):
-		return null
-
-	if expected == TYPE_OBJECT and value == null:
-		return null
-
-	if expected == TYPE_STRING_NAME and value is String:
-		return null
-
-	return bridge.fail(
-		Failure.INVALID_PARAMS,
-		"Expected " + type_string(expected) + ", received " + type_string(typeof(value)),
-	)
 
 
 func viewports(_params: Dictionary) -> Variant:

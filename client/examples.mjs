@@ -20,7 +20,7 @@ try {
   // => Scene: Fixture
 
   // This branch is the conventional deterministic fixture bot. The game owns
-  // movement; the local program schedules input and checks an observed effect.
+  // movement; the client submits input schedules and checks an observed effect.
   if (actions.actions.some((action) => action.name === 'move_forward')) {
     const fixture = (await scene.get('name')) === 'Fixture';
     const before = fixture ? await scene.get('input_ticks') : null;

@@ -1,5 +1,5 @@
 extends RefCounted
-## Shared synchronous GDScript preparation for evaluation and local predicates.
+## Shared synchronous GDScript preparation for evaluation inside Godot.
 
 const Failure = preload("failure.gd")
 

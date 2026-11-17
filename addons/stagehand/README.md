@@ -41,7 +41,9 @@ project settings are installed by this package.
 The no-argument `enable_builtins()` call is shorthand for:
 
 ```gdscript
-bridge.enable_builtins(["Runtime", "SceneTree", "Object", "Screen", "Input", "Script"])
+bridge.enable_builtins(
+	["Runtime", "SceneTree", "Object", "Screen", "Input", "Script", "PropertyRecorder"],
+)
 ```
 
 Pass a subset such as `["Runtime", "Screen", "Input"]` to expose only those
@@ -71,8 +73,8 @@ Selecting both Input and Script adds `hold_until` to Input. See
 [conditional input](../../docs/protocol.md#conditional-input) for its GDScript
 condition and bounded execution rules.
 
-Every client with the token can use the selected endpoints. Enable Object or
-Script only for clients you trust to run code on your machine. Use a private,
+Every client with the token can use the selected endpoints. Enable Object, Script
+or PropertyRecorder only for clients you trust to run code on your machine. Use a private,
 unpredictable launch token; the listener defaults to `127.0.0.1`.
 See [security](../../docs/security.md) for what each builtin lets a client do.
 
@@ -138,8 +140,8 @@ for acceptance, cancellation, subscriptions and wrappers.
 ## Registering game-owned objects
 
 Registration supplies a label, kind, named operations, optional observation
-callback, and events. Operation callbacks receive one Dictionary, execute on the
-main thread, and return a normal value or `bridge.fail(code, message)`.
+callback, and events. Operation callbacks receive one Dictionary, execute on
+Godot's main thread, and return a normal value or `bridge.fail(code, message)`.
 The `kind` also selects optional [client wrapper factories](../../client/README.md#wrapper-factories).
 
 ```gdscript
@@ -185,7 +187,7 @@ NodePaths or JavaScript numbers. `Registry.list` includes only registered roots,
 not every live reference a client has received.
 
 Game logic and asynchronous actions belong to game-owned endpoints.
-`bridge.clock()` supplies observation metadata for their local callbacks.
+`bridge.clock()` supplies observation metadata for their game-side callbacks.
 Global Input can affect the human-controlled character; independent character
 controls belong in your game's operations.
 

@@ -38,21 +38,15 @@ See the [addon usage guide](../addons/stagehand/README.md) for game-side setup a
 
 ## Builtin methods
 
-Builtin wrappers expose their known operations directly:
+Builtin wrappers expose [their operations](../docs/protocol.md#optional-builtin-operations)
+as named methods with the same parameters, for example `runtime.info()` or
+`script.evaluate({source, bindings})`. See [recording](../docs/recording.md) for a
+complete capture/retrieval example.
 
-| Root | Methods |
-| --- | --- |
-| Registry | `list()` |
-| Runtime | `info()` |
-| SceneTree | `current()`, `query(params)` |
-| Object | `inspect(params)`, `get(params)`, `set(params)`, `call(params)` |
-| Script | `evaluate({source, bindings})` |
-| Screen | `viewports()`, `dimensions(params)`, `capture(params)` |
-| Input | `actions()`, `press(params)`, `release(params)`, `moveMouse(params)`, `scroll(params)`, `status({action})`, `cancel({action})`, plus the scheduled helpers below |
-
-Methods accept the protocol's named parameters. `moveMouse` invokes `move_mouse`;
-the scheduled helpers also wait for completion. Generic `invoke()`, observations
-and subscriptions remain available, and `.remote` exposes the original handle.
+`input.moveMouse()` invokes `move_mouse`; the scheduled helpers below also wait
+for completion. `screen.capture()` decodes the PNG into `image: Buffer` alongside
+its capture metadata. Generic `invoke()`, observations and subscriptions remain
+available, and `.remote` exposes the original handle.
 
 The Object root takes an explicit target, for example
 `await objects.get({target: node, property: 'name'})`. In contrast,
@@ -69,7 +63,7 @@ const accepted = await input.startSequence({
   ticks: 120,
   events: [{at_tick: 0, pressed: true, input: {action: 'move_forward'}}],
 });
-// ...other local work...
+// ...other client-side work...
 await accepted.cancel();
 console.log(await accepted.finished);
 ```
@@ -144,9 +138,9 @@ await stop();
 ```
 
 Subscribe resolves when both ends are ready. Native signals deliver an array of
-arguments; published events carry the supplied value. Calling `stop()` detaches
-local delivery immediately; its Promise reports the host's unsubscribe acknowledgment
-or failure.
+arguments; published events carry the supplied value. Calling `stop()` immediately
+detaches the client listener; its Promise reports the server's unsubscribe
+acknowledgment or failure.
 
 ## Wrapper factories
 

@@ -30,7 +30,7 @@ Authenticate within five seconds of connection.
 | `object.subscribe` | `object`, `event` | Ready subscription ID |
 | `object.unsubscribe` | `subscription` | Whether removed |
 
-Ordinary operations execute synchronously on the main thread and return ordinary
+Ordinary operations execute synchronously on Godot's main thread and return ordinary
 RPC results. There is no universal action wrapper or polling requirement. Registered
 callbacks must be bounded; a long callback blocks the game and listener. GDScript
 errors cannot be caught generically here: endpoints must validate their parameters
@@ -40,7 +40,7 @@ own explicit acceptance/completion interface.
 Server notifications:
 
 - `objects.added`: descriptor of a newly registered endpoint.
-- `objects.removed`: `{object}`. Local subscriptions and handles become stale.
+- `objects.removed`: `{object}`. Client subscriptions and handles become stale.
 - `object.event`: `{subscription,object,event,value,clock}`.
 - `stream.error`: `{method,subscription,object,code,message}` when an event value
   cannot be encoded. That event was lost; obtain a fresh observation as appropriate.
@@ -83,6 +83,7 @@ advertises `hold_until` as described under [conditional input](#conditional-inpu
 | `Screen` | `viewports()` — up to 100 live viewports. `dimensions({viewport?})` — logical/texture sizes. `capture({viewport?})` — PNG base64, capture ID, viewport, width/height, MIME, timing. Root window is default. |
 | `Script` | `evaluate({source,bindings?:{}})` — compile a RefCounted evaluator and return its synchronous native result. |
 | `Input` | `actions()`, `press(input)`, `release(input)`, `move_mouse({relative?,position?})`, `move_mouse_to({position,duration_ms,from?})`, `scroll({vertical?,horizontal?,position?})`, `sequence({ticks,events,max_wall_ms?})`, `status({action})`, `cancel({action})`. |
+| `PropertyRecorder` | Captures and one-shot readings inside Godot. See [recording](recording.md) for operations, selectors and lifecycle. |
 
 Reflected access follows actual live references, including ordinary non-exported
 GDScript fields in a release build. Native argument names/defaults/type information
@@ -204,7 +205,7 @@ and refuses during an active scheduled input operation. It does not move the OS 
 The JS convenience is `input.scroll({vertical: 1, position})`.
 
 `move_mouse_to` takes a finite Vector2 destination and 1–60000ms duration. It uses
-linear wall-time interpolation locally, once per process callback, with a final
+linear wall-time interpolation inside Godot, once per process callback, with a final
 exact-destination event. Origin is optional `from`, otherwise the synthetic position
 above. It works for paused UI, shares Input ownership and cancellation, and preserves
 separately held buttons. The runtime allows duration+1000ms wall budget; a stall

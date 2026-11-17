@@ -53,13 +53,14 @@ builtins or enable a selected subset.
 | `Screen` | Viewport discovery, dimensions and screenshots. |
 | `Input` | Synthetic keyboard, mouse and InputMap actions, including bounded sequences. |
 | `Script` | Runtime GDScript evaluation; enables conditional input when Input is selected too. |
+| `PropertyRecorder` | Capture native or scripted readings inside Godot for later retrieval. |
 
 Pass only the names you want, for example
 `bridge.enable_builtins(["Runtime", "Screen", "Input"])`. Call it once with the
 desired set; later calls do not add or replace endpoints. Pass `[]`, or omit the
 call entirely, to expose `Registry` and the game-owned objects you register yourself.
 
-Only enable Object or Script for clients you trust to run code on your machine.
+Only enable Object, Script or PropertyRecorder for clients you trust to run code on your machine.
 Input can play the game and operate its menus.
 See [security](docs/security.md) for what each builtin lets a client do.
 
@@ -137,10 +138,17 @@ for observations, events and object lifetimes, and
 [wrapper factories](client/README.md#wrapper-factories) to add convenient JavaScript
 methods for your object's kind.
 
-## React locally to game state
+## React to game state inside Godot
 
 Select both `Script` and `Input` to hold input until a game-state condition matches,
 without a client round trip per sample. The condition runs as ordinary GDScript
 inside the game, with a simulation-time limit and automatic input release.
 See the [JavaScript example](client/README.md#gdscript-predicates) and
 [conditional-input contract](docs/protocol.md#conditional-input).
+
+## Record measurements
+
+Select `PropertyRecorder` to sample native properties, indexed paths or synchronous
+getters inside Godot, then retrieve retained pages for plotting. Selecting Script too
+allows derived readings through the same GDScript evaluator. See
+[recording](docs/recording.md) for selectors, sampling phases and capture limits.

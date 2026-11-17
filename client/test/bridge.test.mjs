@@ -60,6 +60,7 @@ test('core roots advertise their API versions', async () => {
     Screen: '1.0.0',
     Input: '1.1.0',
     Script: '1.0.0',
+    PropertyRecorder: '1.0.0',
   };
 
   for (const [label, version] of Object.entries(versions)) {

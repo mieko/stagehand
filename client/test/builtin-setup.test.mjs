@@ -59,7 +59,7 @@ test('an explicit empty setup is configured and query results are independent co
 
     assert.equal(original.configured, true);
     assert.deepEqual(original.selected, []);
-    assert.deepEqual(original.available, ['Runtime', 'SceneTree', 'Object', 'Screen', 'Input', 'Script']);
+    assert.deepEqual(original.available, ['Runtime', 'SceneTree', 'Object', 'Screen', 'Input', 'Script', 'PropertyRecorder']);
     assert.deepEqual(changedCopy.available, []);
     assert.deepEqual(changedCopy.selected, ['Changed copy']);
     assert.deepEqual(await setup.invoke('builtin_configuration'), original);

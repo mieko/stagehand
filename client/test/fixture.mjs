@@ -11,12 +11,14 @@ const repo = fileURLToPath(new URL('../../', import.meta.url));
 const godot = process.env.STAGEHAND_GODOT ?? 'godot';
 
 export async function launchFixture({
-  builtins, bindAddress, expectedErrors = [], strictDeclarations,
+  builtins, fixture = 'fixture', bindAddress, expectedErrors = [], strictDeclarations,
 } = {}) {
   const directory = await mkdtemp(join(tmpdir(), 'stagehand-test-'));
   const token = randomBytes(24).toString('hex');
   let child,
     output = '';
+  const unexpectedErrors = () => output.split('\n').filter(line =>
+    /SCRIPT ERROR:|ERROR:/.test(line) && !expectedErrors.some(pattern => pattern.test(line)));
   const userDirectory = join(
     homedir(),
     'Library/Application Support/stagehand-tests',
@@ -33,17 +35,16 @@ export async function launchFixture({
       if (process.platform === 'darwin') await rm(userDirectory, { recursive: true, force: true });
     }
 
-    for (const line of output.split('\n').filter((line) => /SCRIPT ERROR:|ERROR:/.test(line))) {
-      assert.ok(expectedErrors.some((pattern) => pattern.test(line)),
-        `fixture emitted an unexpected engine error:\n${output}`);
-    }
+    assert.deepEqual(unexpectedErrors(), [], `fixture emitted an unexpected engine error:\n${output}`);
   };
 
   try {
-    await cp(join(repo, 'tests/fixture'), directory, { recursive: true });
+    await cp(join(repo, 'tests', fixture), directory, { recursive: true });
     await cp(join(repo, 'addons/stagehand'), join(directory, 'addons/stagehand'), {
       recursive: true,
     });
+
+    await cp(join(repo, 'tests/fixture/export_presets.cfg'), join(directory, 'export_presets.cfg'));
 
     const project = join(directory, 'project.godot');
     await writeFile(
@@ -123,9 +124,10 @@ export async function launchFixture({
       });
     });
 
-    const waitForOutput = (pattern) => new Promise((resolve, reject) => {
+    const waitForOutput = (pattern, timeoutMs = 2000) => new Promise((resolve, reject) => {
       const check = () => {
-        if (pattern.test(output)) finish();
+        if (unexpectedErrors().length) finish(new Error(`Fixture engine error:\n${output}`));
+        else if (pattern.test(output)) finish();
       };
       const finish = (error) => {
         clearTimeout(timer);
@@ -134,7 +136,9 @@ export async function launchFixture({
         if (error) reject(error);
         else resolve(output);
       };
-      const timer = setTimeout(() => finish(new Error(`Missing fixture output: ${pattern}`)), 2000);
+      const timer = setTimeout(
+        () => finish(new Error(`Missing fixture output: ${pattern}\n${output}`)), timeoutMs,
+      );
 
       child.stdout.on('data', check);
       child.stderr.on('data', check);

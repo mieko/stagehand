@@ -270,6 +270,7 @@ const defaultWrappers = {
   SceneTree: builtinMethods(['current', 'query']),
   Object: builtinMethods(['inspect', 'get', 'set', 'call']),
   Script: builtinMethods(['evaluate']),
+  PropertyRecorder: builtinMethods(['start', 'stop', 'read', 'discard', 'inspect']),
   Input: builtinMethods(
     ['actions', 'press', 'release', 'scroll', 'status', 'cancel'],
     InputObject,
@@ -488,7 +489,7 @@ export class StagehandClient extends EventEmitter {
   }
 
   async subscribe(object, event, listener) {
-    // Install the local router before resolving the subscription promise. The
+    // Install the client-side router before resolving the subscription promise. The
     // notification router also buffers the acknowledgment-to-continuation gap.
     const early = [];
     const capture = (item) => {
