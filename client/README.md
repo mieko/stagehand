@@ -15,7 +15,7 @@ Every bridge exposes a `Registry` root, including when optional builtins are off
 
 ```js
 const registry = await game.builtin('Registry');
-const roots = await registry.invoke('list');
+const roots = await registry.list();
 
 console.log(roots.map(({label, kind, version}) => ({label, kind, version})));
 ```
@@ -35,6 +35,28 @@ requires an explicit [game-side bind address](../addons/stagehand/README.md#remo
 
 See the [addon usage guide](../addons/stagehand/README.md) for game-side setup and
 [development commands](../docs/development.md) for the isolated integration suite.
+
+## Builtin methods
+
+Builtin wrappers expose their known operations directly:
+
+| Root | Methods |
+| --- | --- |
+| Registry | `list()` |
+| Runtime | `info()` |
+| SceneTree | `current()`, `query(params)` |
+| Object | `inspect(params)`, `get(params)`, `set(params)`, `call(params)` |
+| Script | `evaluate({source, bindings})` |
+| Screen | `viewports()`, `dimensions(params)`, `capture(params)` |
+| Input | `actions()`, `press(params)`, `release(params)`, `moveMouse(params)`, `scroll(params)`, `status({action})`, `cancel({action})`, plus the scheduled helpers below |
+
+Methods accept the protocol's named parameters. `moveMouse` invokes `move_mouse`;
+the scheduled helpers also wait for completion. Generic `invoke()`, observations
+and subscriptions remain available, and `.remote` exposes the original handle.
+
+The Object root takes an explicit target, for example
+`await objects.get({target: node, property: 'name'})`. In contrast,
+`await node.get('name')` inspects that node through the same root.
 
 ## Input completion and cancellation
 
@@ -148,9 +170,10 @@ console.log(await dingus.hello());
 ```
 
 On the Godot side, register that object's `kind` as `"Dingus"`. Its label
-(`"My dingus"`) is independent of its type. The factory receives a generic
-`RemoteObject` and returns whatever object you want callers to use: a class
-instance or a plain object, with no inheritance requirement.
+(`"My dingus"`) is independent of its type. For builtin kinds, the factory receives
+Stagehand's default wrapper; other kinds receive a generic `RemoteObject`. Return
+whatever object you want callers to use: a class instance or a plain object, with
+no inheritance requirement.
 Each returned wrapper represents one remote object on one connection. If caching
 wrappers, keep a separate cache per connection keyed by object identity.
 
@@ -184,10 +207,34 @@ The same factory path handles discovery, returned references, nested arrays/maps
 observations and events. Wrapped objects can also be passed back as RPC arguments.
 Types without a factory remain ordinary `RemoteObject`s.
 
-Input and Screen helpers live on `InputObject` and `ScreenObject`, supplied through
-the default `Input` and `Screen` factories. Your entries override or extend those
-defaults for this connection only. Builtin handles are cached, and each lookup
-uses the current factories. You can also assign `game.wrappers.Dingus = factory`
+To add consumer methods while retaining Stagehand's builtin helpers, extend the
+wrapper you receive:
+
+```js
+const game = await connect(url, {
+  token,
+  wrappers: {
+    Input: input => Object.assign(input, {
+      tap: descriptor => input.sequence({
+        ticks: 1,
+        events: [{at_tick: 0, pressed: true, input: descriptor}],
+      }),
+    }),
+  },
+});
+
+const input = await game.builtin('Input');
+await input.tap({key: 'W', physical: true});
+console.log(await input.actions());
+```
+
+`Object.assign` retains class methods, including Input's completion helpers and
+Screen's PNG decoding; spreading the instance into a plain object does not.
+Return a different object when you intentionally want a replacement. Factories
+apply to discovery and references returned in results/events alike.
+
+Your `wrappers` entries affect this connection only. Builtin handles are cached,
+and each lookup uses the current factories. Assign `game.wrappers.Dingus = factory`
 for subsequent lookups; objects you've already received keep their wrappers.
 
 Factories must synchronously return an object. Factory errors reject the affected

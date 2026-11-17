@@ -1,6 +1,6 @@
 import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { connect, InputObject, forwardMethods, RemoteObject, ScreenObject } from '../client.mjs';
+import { connect, GodotValue, InputObject, forwardMethods, RemoteObject, ScreenObject } from '../client.mjs';
 import { launchFixture } from './fixture.mjs';
 
 let fixture;
@@ -98,6 +98,99 @@ test('standard endpoints use their registered kinds through ordinary discovery a
     const returned = await probe.invoke('echo', { value: { input } });
     assert.ok(returned.input instanceof InputObject);
     assert.equal(returned.input.id, input.id);
+  } finally {
+    game.close();
+  }
+});
+
+test('builtin methods expose the known operations without invoke', async () => {
+  const game = await connect(fixture.url, {token: fixture.token});
+
+  try {
+    const registry = await game.builtin('Registry');
+    const runtime = await game.builtin('Runtime');
+    const tree = await game.builtin('SceneTree');
+    const objects = await game.builtin('Object');
+    const script = await game.builtin('Script');
+
+    assert.ok((await registry.list()).some((root) => root.label === 'Script'));
+    assert.equal(typeof (await runtime.info()).physics_ticks_per_second, 'number');
+
+    const {scene} = await tree.current();
+    const matches = await tree.query({root: scene, name: 'Fixture'});
+    assert.equal(matches.nodes[0].node.id, scene.id);
+    assert.ok((await objects.inspect({target: scene})).properties.some((p) => p.name === 'name'));
+
+    await objects.set({target: scene, property: 'clicks', value: 17});
+    assert.equal(await objects.get({target: scene, property: 'clicks'}), 17);
+    assert.equal(await objects.call({target: scene, method: 'get_class'}), 'Node');
+    assert.equal(await objects.remote.call('get_class'), 'RefCounted');
+    assert.equal(await scene.get('clicks'), 17);
+
+    const source = `extends RefCounted
+
+func evaluate(bindings: Dictionary) -> int:
+    return bindings.n * 2
+`;
+    assert.equal(await script.evaluate({source, bindings: {n: 21}}), 42);
+  } finally {
+    game.close();
+  }
+});
+
+test('input and screen wrappers include immediate methods as well as scheduled helpers', async () => {
+  const game = await connect(fixture.url, {token: fixture.token});
+
+  try {
+    const input = await game.builtin('Input');
+    const screen = await game.builtin('Screen');
+    assert.ok((await input.actions()).actions.some((action) => action.name === 'jump'));
+
+    await input.press({action: 'jump'});
+    assert.deepEqual((await input.observe()).value.held_inputs, ['action:jump']);
+    await input.release({action: 'jump'});
+
+    const position = new GodotValue({type: 'Vector2', args: [30, 25]});
+    await input.moveMouse({position});
+    assert.deepEqual((await input.observe()).value.synthetic_position.args, position.args);
+
+    const action = await input.startSequence({ticks: 600});
+    assert.equal((await input.status({action: action.action})).status, 'running');
+    assert.equal((await input.cancel({action: action.action})).status, 'cancelled');
+    assert.equal((await action.finished).status, 'cancelled');
+
+    const viewport = (await screen.viewports()).find((entry) => entry.path.endsWith('/TestViewport'));
+    assert.deepEqual((await screen.dimensions({viewport: viewport.viewport})).logical_size.args,
+      [320, 240]);
+  } finally {
+    game.close();
+  }
+});
+
+test('consumer factories can extend the standard wrapper and keep its helpers on returned refs', async () => {
+  const game = await connect(fixture.url, {
+    token: fixture.token,
+    wrappers: {
+      Input: input => Object.assign(input, {
+        tap: descriptor => input.sequence({
+          ticks: 1,
+          events: [{at_tick: 0, pressed: true, input: descriptor}],
+        }),
+      }),
+    },
+  });
+
+  try {
+    const input = await game.builtin('Input');
+    assert.ok(input instanceof InputObject);
+    assert.equal((await input.tap({action: 'jump'})).status, 'completed');
+    assert.ok((await input.actions()).actions.some((action) => action.name === 'jump'));
+
+    const probe = await game.findObject('A');
+    const nested = await probe.invoke('echo', {value: {input}});
+    assert.ok(nested.input instanceof InputObject);
+    assert.equal((await nested.input.tap({action: 'jump'})).status, 'completed');
+    assert.deepEqual((await input.observe()).value.held_inputs, []);
   } finally {
     game.close();
   }
@@ -252,7 +345,7 @@ test('a wrapper instance cannot silently change which remote object it represent
   }
 });
 
-test('builtin factories can be overridden through the same object literal', async () => {
+test('consumer factories can deliberately replace a standard wrapper', async () => {
   const game = await connect(fixture.url, {
     token: fixture.token,
     wrappers: {

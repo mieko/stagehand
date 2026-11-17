@@ -82,7 +82,7 @@ const game = await connect('ws://127.0.0.1:49152', {
 });
 
 const tree = await game.builtin('SceneTree');
-console.log(await tree.invoke('current'));
+console.log(await tree.current());
 // => { root: RemoteObject { id: '…', … }, scene: RemoteObject { id: '…', … } }
 // Reuse game for later calls, then game.close().
 ```
@@ -95,7 +95,7 @@ Ordinary Node scripts, persistent JS sessions and bots use the same API.
 ```js
 const registry = await game.builtin('Registry');
 
-for (const object of await registry.invoke('list')) {
+for (const object of await registry.list()) {
   console.log(object.label, object.kind);
 }
 // => Registry Registry

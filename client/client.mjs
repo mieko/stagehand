@@ -131,19 +131,19 @@ export class RemoteObject {
   }
 
   async inspect() {
-    return (await this.client.builtin('Object')).invoke('inspect', { target: this });
+    return (await this.client.builtin('Object')).inspect({ target: this });
   }
 
   async get(property) {
-    return (await this.client.builtin('Object')).invoke('get', { target: this, property });
+    return (await this.client.builtin('Object')).get({ target: this, property });
   }
 
   async set(property, value) {
-    return (await this.client.builtin('Object')).invoke('set', { target: this, property, value });
+    return (await this.client.builtin('Object')).set({ target: this, property, value });
   }
 
   async call(method, ...args) {
-    return (await this.client.builtin('Object')).invoke('call', { target: this, method, args });
+    return (await this.client.builtin('Object')).call({ target: this, method, args });
   }
 }
 
@@ -165,10 +165,6 @@ export function forwardMethods(names) {
 }
 
 export class InputObject extends RemoteObject {
-  constructor(remote) {
-    super(remote.client, remote.id);
-  }
-
   async startSequence(params) {
     return this.#startAction('sequence', params);
   }
@@ -249,16 +245,12 @@ export class InputObject extends RemoteObject {
     return (await this.startHoldUntil(params)).finished;
   }
 
-  async scroll(params) {
-    return this.invoke('scroll', params);
+  moveMouse(params) {
+    return this.invoke('move_mouse', params);
   }
 }
 
 export class ScreenObject extends RemoteObject {
-  constructor(remote) {
-    super(remote.client, remote.id);
-  }
-
   async capture(params = {}) {
     const { base64, ...info } = await this.invoke('capture', params);
 
@@ -266,9 +258,23 @@ export class ScreenObject extends RemoteObject {
   }
 }
 
+function builtinMethods(names, Wrapper = RemoteObject) {
+  const forward = forwardMethods(names);
+
+  return remote => Object.assign(new Wrapper(remote.client, remote.id), forward(remote));
+}
+
 const defaultWrappers = {
-  Input: (remote) => new InputObject(remote),
-  Screen: (remote) => new ScreenObject(remote),
+  Registry: builtinMethods(['list']),
+  Runtime: builtinMethods(['info']),
+  SceneTree: builtinMethods(['current', 'query']),
+  Object: builtinMethods(['inspect', 'get', 'set', 'call']),
+  Script: builtinMethods(['evaluate']),
+  Input: builtinMethods(
+    ['actions', 'press', 'release', 'scroll', 'status', 'cancel'],
+    InputObject,
+  ),
+  Screen: builtinMethods(['viewports', 'dimensions'], ScreenObject),
 };
 
 export class RpcError extends Error {
@@ -291,7 +297,7 @@ export class StagehandClient extends EventEmitter {
   constructor(socket, { wrappers = {} } = {}) {
     super();
     this.#socket = socket;
-    this.wrappers = { ...defaultWrappers, ...wrappers };
+    this.wrappers = { ...wrappers };
     socket.addEventListener('message', ({ data }) => {
       const message = JSON.parse(data);
       for (const item of Array.isArray(message) ? message : [message]) {
@@ -432,11 +438,12 @@ export class StagehandClient extends EventEmitter {
     if (type !== undefined) this.#types.set(id, type);
 
     const remote = new RemoteObject(this, id);
-    if (type === undefined || !Object.hasOwn(this.wrappers, type)) {
+    if (type === undefined) {
       return remote;
     }
 
-    const wrapped = this.wrappers[type](remote);
+    const standard = Object.hasOwn(defaultWrappers, type) ? defaultWrappers[type](remote) : remote;
+    const wrapped = Object.hasOwn(this.wrappers, type) ? this.wrappers[type](standard) : standard;
     if (wrapped && typeof wrapped.then === 'function') {
       Promise.resolve(wrapped).catch(() => {});
 

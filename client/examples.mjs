@@ -7,7 +7,7 @@ const game = await connect(process.env.STAGEHAND_URL, { token: process.env.STAGE
 
 try {
   const input = await game.builtin('Input');
-  const actions = await input.invoke('actions');
+  const actions = await input.actions();
   console.log(
     'Available actions:',
     actions.actions.map((action) => action.name),
@@ -15,7 +15,7 @@ try {
   // => Available actions: [ …, 'move_forward', 'jump' ]
 
   const tree = await game.builtin('SceneTree');
-  const scene = (await tree.invoke('current')).scene;
+  const scene = (await tree.current()).scene;
   console.log('Scene:', await scene.get('name'));
   // => Scene: Fixture
 
