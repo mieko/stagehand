@@ -239,9 +239,11 @@ func _string_bytes(value: String) -> int:
 	if value.length() + 2 > MAX_SAMPLE_BYTES - _sample_bytes:
 		return MAX_SAMPLE_BYTES + 1
 
-	if value.is_empty() or value.is_valid_ascii_identifier():
-		return value.length() + 2
+	if value.is_empty():
+		return 2
 
+	# COMPAT SHIM: Godot 4.3 lacks is_valid_ascii_identifier().
+	# When dropping 4.3, restore that fast path before escaped UTF-8 counting.
 	return value.json_escape().to_utf8_buffer().size() + 2
 
 

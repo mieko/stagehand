@@ -103,7 +103,9 @@ func _check_methods(script: GDScript) -> Variant:
 				"Expected evaluate(bindings) with one Dictionary or Variant argument",
 			)
 
-		if args[0].get("hint", PROPERTY_HINT_NONE) == PROPERTY_HINT_DICTIONARY_TYPE:
+		# COMPAT SHIM: 4.3 lacks PROPERTY_HINT_DICTIONARY_TYPE.
+		# Without 4.3 support, test that hint enum directly.
+		if args[0].type == TYPE_DICTIONARY and not args[0].get("hint_string", "").is_empty():
 			return bridge.fail(
 				Failure.INVALID_PARAMS,
 				"Evaluator bindings must accept an untyped Dictionary",

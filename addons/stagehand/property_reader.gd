@@ -219,10 +219,15 @@ func _check_container_arguments(object: Object) -> Variant:
 		var arguments: Array = method.get("args", [])
 		for index: int in mini(arguments.size(), _args.size()):
 			var info: Dictionary = arguments[index]
-			if info.get("hint", PROPERTY_HINT_NONE) not in [
-				PROPERTY_HINT_ARRAY_TYPE,
-				PROPERTY_HINT_DICTIONARY_TYPE,
-			]:
+			# COMPAT SHIM: 4.3 lacks PROPERTY_HINT_DICTIONARY_TYPE.
+			# Without 4.3 support, use the container hint enums here.
+			if (
+				info.type not in [TYPE_ARRAY, TYPE_DICTIONARY]
+				or info.get("hint_string", "").is_empty()
+			):
+				continue
+
+			if typeof(_args[index]) != info.type:
 				continue
 
 			if _container_hint(_args[index]) != info.hint_string:
@@ -241,9 +246,12 @@ func _container_hint(value: Variant) -> String:
 		return _element_hint(value.get_typed_builtin())
 
 	if value is Dictionary:
-		return _element_hint(value.get_typed_key_builtin()) + ";" + _element_hint(
-			value.get_typed_value_builtin()
-		)
+		# COMPAT SHIM: named calls keep this file parseable on Godot 4.3.
+		# Typed metadata gates this path to newer engines; dropping 4.3 allows direct calls.
+		var key_type: int = Callable.create(value, "get_typed_key_builtin").call()
+		var value_type: int = Callable.create(value, "get_typed_value_builtin").call()
+
+		return _element_hint(key_type) + ";" + _element_hint(value_type)
 
 	return ""
 

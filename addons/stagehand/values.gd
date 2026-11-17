@@ -2,6 +2,9 @@ extends RefCounted
 ## Object references stay live handles; native value types use Godot's JSON codec.
 
 var bridge: Node
+var _native_codec: RefCounted
+var _from_native: Callable
+var _to_native: Callable
 const Failure = preload("failure.gd")
 const COMPONENTS := {
 	"Vector2": 2,
@@ -38,6 +41,12 @@ const PACKED := {
 
 func _init(owner: Node) -> void:
 	bridge = owner
+	_native_codec = owner.native_codec
+
+	# COMPAT SHIM: direct JSON conversion calls fail compilation on Godot 4.3.
+	# Without 4.3 support, use JSON.from_native/to_native and remove this dispatch.
+	_from_native = Callable(_native_codec, "from_native")
+	_to_native = Callable(_native_codec, "to_native")
 
 
 func snapshot(value: Variant, depth: int = 0) -> Variant:
@@ -79,7 +88,7 @@ func encode(value: Variant, depth: int = 0) -> Variant:
 			return (
 				value
 				if value >= -9007199254740991 and value <= 9007199254740991
-				else { "$godot": JSON.from_native(value) }
+				else { "$godot": _from_native.call(value) }
 			)
 		TYPE_FLOAT:
 			if is_finite(value):
@@ -87,7 +96,7 @@ func encode(value: Variant, depth: int = 0) -> Variant:
 
 			return { "$godot": "f:nan" if is_nan(value) else ("f:inf" if value > 0 else "f:-inf") }
 		TYPE_STRING_NAME, TYPE_NODE_PATH:
-			return { "$godot": JSON.from_native(value) }
+			return { "$godot": _from_native.call(value) }
 		TYPE_OBJECT:
 			if not is_instance_valid(value):
 				return null
@@ -131,7 +140,7 @@ func encode(value: Variant, depth: int = 0) -> Variant:
 				"Value type is not transferable: " + type_string(typeof(value)),
 			)
 		_:
-			var native: Variant = JSON.from_native(value)
+			var native: Variant = _from_native.call(value)
 			var validated: Variant = _native(native)
 			if validated is Failure:
 				return bridge.fail(Failure.RESOURCE_LIMIT, validated.message)
@@ -241,7 +250,7 @@ func _native(value: Variant) -> Variant:
 		):
 			return bridge.fail(Failure.INVALID_PARAMS, "Unknown native scalar encoding")
 
-		return JSON.to_native(value, false)
+		return _to_native.call(value, false)
 
 	if not value is Dictionary or not value.get("type") is String or not value.get("args") is Array:
 		return bridge.fail(
@@ -276,4 +285,4 @@ func _native(value: Variant) -> Variant:
 				"Native components must be finite, JSON-safe numbers",
 			)
 
-	return JSON.to_native(value, false)
+	return _to_native.call(value, false)

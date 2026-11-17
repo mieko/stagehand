@@ -55,6 +55,11 @@ target for code. Style checks are distinct from Godot runtime checks.
 The addon targets Godot 4.5+. Run the suite against the engine and release template
 you intend to ship; the tests do not change installed editors or templates.
 
+`compatibility.gd` selects runtime implementations during bridge construction.
+Only the selected engine-specific scripts are loaded, relative to that helper's
+location. Keep version checks and shim loading there rather than in transport or
+value encoding.
+
 Release builds may omit native argument metadata. Screenshots require a rendered
 viewport, and image readback/PNG encoding can block the main thread. Injected mouse
 events do not move the OS cursor. See [the protocol](protocol.md) for these contracts.

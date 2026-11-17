@@ -10,6 +10,10 @@ const MAX_PEERS := 8
 const Values = preload("values.gd")
 const Failure = preload("failure.gd")
 const Builtins = preload("builtins.gd")
+const Compatibility = preload("compatibility.gd")
+
+var native_codec: RefCounted
+var signal_factory: GDScript
 
 var _server := TCPServer.new()
 var _rpc := JSONRPC.new()
@@ -29,6 +33,7 @@ var _registry_handle := ""
 
 
 func _init() -> void:
+	Compatibility.new().apply(self)
 	_values = Values.new(self)
 	_instance = Crypto.new().generate_random_bytes(16).hex_encode()
 	process_mode = Node.PROCESS_MODE_ALWAYS
@@ -262,8 +267,14 @@ func _listen_signal(handle: String, event: String) -> Variant:
 	if not target.has_signal(event):
 		return fail(Failure.INVALID_PARAMS, "Unknown registered event or signal")
 
-	var callback := func(...args):
+	# COMPAT SHIM: Godot 4.3 cannot parse an inline variadic callback.
+	# Without 4.3 support, inline that callback and remove the signal factory.
+	var listener := func(args: Array):
 		publish(handle, event, args)
+
+	var callback: Callable = signal_factory.create(target, event, listener)
+	if not callback.is_valid():
+		return fail(Failure.RESOURCE_LIMIT, "Cannot create native signal callback")
 
 	if target.connect(event, callback) != OK:
 		return fail(Failure.RESOURCE_LIMIT, "Cannot subscribe to signal")
