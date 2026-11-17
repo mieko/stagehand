@@ -54,8 +54,8 @@ test('core roots advertise their API versions', async () => {
   const roots = await registry.invoke('list');
   const versions = {
     Registry: '1.0.0',
-    Runtime: '1.0.0',
-    SceneTree: '1.0.0',
+    Runtime: '2.0.0',
+    SceneTree: '2.0.0',
     Object: '1.0.0',
     Screen: '1.0.0',
     Input: '1.1.0',

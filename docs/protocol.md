@@ -77,13 +77,19 @@ advertises `hold_until` as described under [conditional input](#conditional-inpu
 
 | Label | Operations and parameters |
 | --- | --- |
-| `Runtime` | `info()` — engine, display server, scene, pause/time-scale/tick-rate state. Its observer returns the same information. |
-| `SceneTree` | `current()` — root/current scene refs. `query({root?,name?:glob,class?:nativeClass,internal?:false,limit?:100})` — bounded breadth-first live node records with ref, path, native class, groups, parent; includes root if matching. |
+| `Runtime` | `info()` — engine name/version, save directory, display server, scene, pause/time-scale/tick-rate state. Its observer returns the same information. |
+| `SceneTree` | `current()` — root/current scene refs. `query({root?,name?:glob,class?:nativeClass,internal?:false,offset?:0,limit?:100})` — breadth-first live node records with node reference, name, path, class, groups and parent. Returns `{nodes, more}`; offsets count matching nodes, including the root if it matches. |
 | `Object` | `inspect({target})` — property/method/signal metadata. `get({target,property})`, `set({target,property,value})`, `call({target,method,args?:[]})`. |
 | `Screen` | `viewports()` — up to 100 live viewports. `dimensions({viewport?})` — logical/texture sizes. `capture({viewport?})` — PNG base64, capture ID, viewport, width/height, MIME, timing. Root window is default. |
 | `Script` | `evaluate({source,bindings?:{}})` — compile a RefCounted evaluator and return its synchronous native result. |
 | `Input` | `actions()`, `press(input)`, `release(input)`, `move_mouse({relative?,position?})`, `move_mouse_to({position,duration_ms,from?})`, `scroll({vertical?,horizontal?,position?})`, `sequence({ticks,events,max_wall_ms?})`, `status({action})`, `cancel({action})`. |
 | `PropertyRecorder` | Captures and one-shot readings inside Godot. See [recording](recording.md) for operations, selectors and lifecycle. |
+
+Runtime `engine` metadata uses ordinary string keys and includes `name`, `major`,
+`minor` and `patch` alongside Godot's remaining version fields. `save_directory`
+is the current game's user-data directory. Scene queries accept limits up to
+1,000 and fail explicitly beyond 10,000 visited nodes; use a smaller root for a
+large tree. Separate pages are live queries, not a retained tree snapshot.
 
 Reflected access follows actual live references, including ordinary non-exported
 GDScript fields in a release build. Native argument names/defaults/type information

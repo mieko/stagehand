@@ -30,7 +30,7 @@ func install(names: PackedStringArray) -> void:
 			[],
 			{ },
 			true,
-			"1.0.0",
+			"2.0.0",
 		)
 
 	if "SceneTree" in names:
@@ -43,7 +43,7 @@ func install(names: PackedStringArray) -> void:
 			[],
 			{ },
 			true,
-			"1.0.0",
+			"2.0.0",
 		)
 
 	if "Object" in names:
@@ -109,8 +109,15 @@ func runtime_info(_params: Dictionary) -> Dictionary:
 
 
 func runtime_observation() -> Dictionary:
+	var version := Engine.get_version_info()
+	var engine := { "name": "Godot" }
+
+	for key: Variant in version:
+		engine[str(key)] = version[key]
+
 	return {
-		"engine": Engine.get_version_info(),
+		"engine": engine,
+		"save_directory": OS.get_user_data_dir(),
 		"paused": bridge.get_tree().paused,
 		"physics_ticks_per_second": Engine.physics_ticks_per_second,
 		"time_scale": Engine.time_scale,
@@ -132,30 +139,48 @@ func query(params: Dictionary) -> Variant:
 	if not (limit is float or limit is int) or limit < 1 or limit > 1000 or limit != floor(limit):
 		return bridge.fail(Failure.INVALID_PARAMS, "Query limit must be an integer in 1..1000")
 
+	var offset: Variant = params.get("offset", 0)
+	if not (offset is float or offset is int) or offset < 0 or offset != floor(offset):
+		return bridge.fail(Failure.INVALID_PARAMS, "Query offset must be a non-negative integer")
+
 	var queue: Array[Node] = [parent]
 	var nodes: Array = []
 	var visited := 0
+	var matched := 0
 
-	while not queue.is_empty() and nodes.size() < limit and visited < 10000:
-		var node: Node = queue.pop_front()
+	while visited < queue.size():
+		if visited >= 10000:
+			return bridge.fail(
+				Failure.RESOURCE_LIMIT,
+				"Query exceeds 10000 nodes; use a smaller root",
+			)
+
+		var node: Node = queue[visited]
 		visited += 1
+
 		if node.name.match(str(params.get("name", "*"))) and (
 				not params.has("class") or node.is_class(str(params["class"]))
 			):
-			nodes.append(
-				{
-					"node": node,
-					"name": str(node.name),
-					"path": str(node.get_path()),
-					"class": node.get_class(),
-					"groups": node.get_groups(),
-					"parent": node.get_parent(),
-				},
-			)
+			if matched >= offset + limit:
+				return { "nodes": nodes, "more": true }
+
+			if matched >= offset:
+				nodes.append(
+					{
+						"node": node,
+						"name": str(node.name),
+						"path": str(node.get_path()),
+						"class": node.get_class(),
+						"groups": node.get_groups(),
+						"parent": node.get_parent(),
+					},
+				)
+
+			matched += 1
 
 		queue.append_array(node.get_children(bool(params.get("internal", false))))
 
-	return { "nodes": nodes, "truncated": not queue.is_empty() }
+	return { "nodes": nodes, "more": false }
 
 
 func viewports(_params: Dictionary) -> Variant:

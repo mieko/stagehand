@@ -10,7 +10,7 @@ subject to the game's operating-system permissions.
 | Builtin | What a connected client can do |
 | --- | --- |
 | Registry | List the objects, operations and events you have exposed. Always present. |
-| Runtime | Read engine version, timing settings and the current scene reference. |
+| Runtime | Read engine version, save-directory path, timing settings and the current scene reference. |
 | SceneTree | Find nodes and read their names, paths, classes and groups; receive references to them. |
 | Screen | Take screenshots of game viewports and read their dimensions. |
 | Input | Press keys and mouse buttons, send mouse motion and wheel events, and trigger InputMap actions. This can play the game and operate its menus. |

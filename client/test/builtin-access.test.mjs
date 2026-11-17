@@ -24,6 +24,43 @@ func evaluate(_bindings: Dictionary) -> int:
   }
 });
 
+test('tree queries page through native matches and runtime metadata identifies the engine', async () => {
+  const fixture = await launchFixture();
+  const game = await connect(fixture.url, { token: fixture.token });
+
+  try {
+    const tree = await game.builtin('SceneTree');
+    const runtime = await game.builtin('Runtime');
+    const { scene } = await tree.current();
+    const all = await tree.query({ root: scene, class: 'Node', limit: 1000 });
+    const first = await tree.query({ root: scene, class: 'Node', limit: 2 });
+    const next = await tree.query({ root: scene, class: 'Node', offset: 2, limit: 2 });
+    const end = await tree.query({ root: scene, class: 'Node', offset: all.nodes.length });
+
+    assert.ok(all.nodes.length > 4);
+    assert.equal(all.more, false);
+    assert.deepEqual(first.nodes.map(n => n.node.id), all.nodes.slice(0, 2).map(n => n.node.id));
+    assert.deepEqual(next.nodes.map(n => n.node.id), all.nodes.slice(2, 4).map(n => n.node.id));
+    assert.equal(first.more, true);
+    assert.deepEqual(end, { nodes: [], more: false });
+    const filtered = await tree.query({ root: scene, name: 'Capsule', offset: 0, limit: 1 });
+    const filteredEnd = await tree.query({ root: scene, name: 'Capsule', offset: 1, limit: 1 });
+
+    assert.equal(filtered.nodes[0].name, 'Capsule');
+    assert.equal(filtered.more, false);
+    assert.deepEqual(filteredEnd, { nodes: [], more: false });
+    await assert.rejects(tree.query({ offset: -1 }), { code: -32602 });
+
+    const info = await runtime.info();
+    assert.equal(info.engine.name, 'Godot');
+    assert.equal(typeof info.engine.major, 'number');
+    assert.equal(typeof info.save_directory, 'string');
+  } finally {
+    game.close();
+    await fixture.stop();
+  }
+});
+
 test('facade-only configuration refuses undeclared signals through raw RPC', async () => {
   const fixture = await launchFixture({ builtins: [] });
   const game = await connect(fixture.url, { token: fixture.token });
