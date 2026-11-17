@@ -1,7 +1,8 @@
 # JavaScript client
 
 Import `connect`, `GodotValue` and `RpcError` from `client.mjs`, or import the local
-package `godot-stagehand`. Node 22+ needs no dependency installation.
+package `godot-stagehand`. Node 22+ provides a built-in WebSocket. A runtime without a
+global WebSocket can pass a constructor in `connect(url, {token, WebSocket})`.
 Keep a client connected to reuse handles and subscriptions; call `close()` when done.
 
 See the [wire protocol](../docs/protocol.md) for message and value formats when
@@ -17,7 +18,7 @@ Every bridge exposes a `Registry` root, including when optional builtins are off
 const registry = await game.builtin('Registry');
 const roots = await registry.list();
 
-console.log(roots.map(({label, kind, version}) => ({label, kind, version})));
+console.log(roots.map(({ label, kind, version }) => ({ label, kind, version })));
 ```
 
 The list includes Registry itself and reflects current registrations/removals.
@@ -61,7 +62,7 @@ The Object root takes an explicit target, for example
 ```js
 const accepted = await input.startSequence({
   ticks: 120,
-  events: [{at_tick: 0, pressed: true, input: {action: 'move_forward'}}],
+  events: [{ at_tick: 0, pressed: true, input: { action: 'move_forward' } }],
 });
 // ...other client-side work...
 await accepted.cancel();
@@ -87,15 +88,18 @@ Select Script and Input in the game first. The helper generates complete GDScrip
 the game compiles and runs it. This example assumes a live `capsule` reference:
 
 ```js
-import {gdPredicate} from './client.mjs';
+import { gdPredicate } from './client.mjs';
 
 const input = await game.builtin('Input');
 const accepted = await input.startHoldUntil({
-  ...gdPredicate({
-    value: 'capsule.global_position.y',
-    matched: 'value >= 1.5',
-  }, {capsule}),
-  hold: [{key: 'W', physical: true}],
+  ...gdPredicate(
+    {
+      value: 'capsule.global_position.y',
+      matched: 'value >= 1.5',
+    },
+    { capsule },
+  ),
+  hold: [{ key: 'W', physical: true }],
   max_simulation_seconds: 3,
 });
 const result = await accepted.finished;
@@ -133,7 +137,7 @@ Install the subscription before triggering the operation:
 
 ```js
 const stop = await object.subscribe('changed', (event) => console.log(event.value));
-await object.invoke('increment', {amount: 1});
+await object.invoke('increment', { amount: 1 });
 await stop();
 ```
 
@@ -152,7 +156,7 @@ literal mapping remote types to synchronous wrapper functions:
 const game = await connect(url, {
   token,
   wrappers: {
-    Dingus: remote => ({
+    Dingus: (remote) => ({
       hello: () => remote.invoke('hello'),
     }),
   },
@@ -208,17 +212,19 @@ wrapper you receive:
 const game = await connect(url, {
   token,
   wrappers: {
-    Input: input => Object.assign(input, {
-      tap: descriptor => input.sequence({
-        ticks: 1,
-        events: [{at_tick: 0, pressed: true, input: descriptor}],
+    Input: (input) =>
+      Object.assign(input, {
+        tap: (descriptor) =>
+          input.sequence({
+            ticks: 1,
+            events: [{ at_tick: 0, pressed: true, input: descriptor }],
+          }),
       }),
-    }),
   },
 });
 
 const input = await game.builtin('Input');
-await input.tap({key: 'W', physical: true});
+await input.tap({ key: 'W', physical: true });
 console.log(await input.actions());
 ```
 

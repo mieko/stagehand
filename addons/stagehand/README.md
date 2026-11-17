@@ -1,8 +1,8 @@
 # Stagehand
 
-A pure GDScript addon for Godot 4.5+. It provides an explicitly enabled runtime
-endpoint for external bots, interactive JS sessions, and automated tests, using
-JSON-RPC 2.0 over a persistent WebSocket connection.
+The Stagehand addon exposes a Godot game to external clients over a persistent
+JSON-RPC 2.0 WebSocket connection. It is written in GDScript. See
+[engine compatibility](../../docs/development.md#compatibility-and-limits).
 
 The addon is the scripts in this directory. Copy this directory into a Godot
 project; create the bridge from a game-owned startup node when control is wanted:

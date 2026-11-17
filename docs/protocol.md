@@ -6,7 +6,12 @@ for binding and transport options. Authentication and wire semantics are identic
 for local and remote clients.
 
 ```json
-{"jsonrpc":"2.0","id":"1","method":"session.hello","params":{"token":"PRIVATE_LAUNCH_TOKEN","protocol":1}}
+{
+  "jsonrpc": "2.0",
+  "id": "1",
+  "method": "session.hello",
+  "params": { "token": "PRIVATE_LAUNCH_TOKEN", "protocol": 1 }
+}
 ```
 
 The result contains protocol, random running-instance identity, engine version,
@@ -20,15 +25,15 @@ Authenticate within five seconds of connection.
 
 ## Wire methods
 
-| Method | Named parameters | Result |
-| --- | --- | --- |
-| `session.hello` | `token`, optional `protocol:1` | Session snapshot |
-| `objects.list` | none | Fresh registered descriptors |
-| `object.describe` | `object` handle | Descriptor |
-| `object.observe` | `object` handle | `{object,value,clock}` |
-| `object.call` | `object`, `method`, optional `params:{}` | Registered operation's value |
-| `object.subscribe` | `object`, `event` | Ready subscription ID |
-| `object.unsubscribe` | `subscription` | Whether removed |
+| Method               | Named parameters                         | Result                       |
+| -------------------- | ---------------------------------------- | ---------------------------- |
+| `session.hello`      | `token`, optional `protocol:1`           | Session snapshot             |
+| `objects.list`       | none                                     | Fresh registered descriptors |
+| `object.describe`    | `object` handle                          | Descriptor                   |
+| `object.observe`     | `object` handle                          | `{object,value,clock}`       |
+| `object.call`        | `object`, `method`, optional `params:{}` | Registered operation's value |
+| `object.subscribe`   | `object`, `event`                        | Ready subscription ID        |
+| `object.unsubscribe` | `subscription`                           | Whether removed              |
 
 Ordinary operations execute synchronously on Godot's main thread and return ordinary
 RPC results. There is no universal action wrapper or polling requirement. Registered
@@ -75,15 +80,15 @@ for builtin selection and setup errors, and [security](security.md) for what eac
 builtin lets a client do. When Script and Input are both selected, Input also
 advertises `hold_until` as described under [conditional input](#conditional-input).
 
-| Label | Operations and parameters |
-| --- | --- |
-| `Runtime` | `info()` — engine name/version, save directory, display server, scene, pause/time-scale/tick-rate state. Its observer returns the same information. |
-| `SceneTree` | `current()` — root/current scene refs. `query({root?,name?:glob,class?:nativeClass,internal?:false,offset?:0,limit?:100})` — breadth-first live node records with node reference, name, path, class, groups and parent. Returns `{nodes, more}`; offsets count matching nodes, including the root if it matches. |
-| `Object` | `inspect({target})` — property/method/signal metadata. `get({target,property})`, `set({target,property,value})`, `call({target,method,args?:[]})`. |
-| `Screen` | `viewports()` — up to 100 live viewports. `dimensions({viewport?})` — logical/texture sizes. `capture({viewport?})` — PNG base64, capture ID, viewport, width/height, MIME, timing. Root window is default. |
-| `Script` | `evaluate({source,bindings?:{}})` — compile a RefCounted evaluator and return its synchronous native result. |
-| `Input` | `actions()`, `press(input)`, `release(input)`, `move_mouse({relative?,position?})`, `move_mouse_to({position,duration_ms,from?})`, `scroll({vertical?,horizontal?,position?})`, `sequence({ticks,events,max_wall_ms?})`, `status({action})`, `cancel({action})`. |
-| `PropertyRecorder` | Captures and one-shot readings inside Godot. See [recording](recording.md) for operations, selectors and lifecycle. |
+| Label              | Operations and parameters                                                                                                                                                                                                                                                                                        |
+| ------------------ | ---------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| `Runtime`          | `info()` — engine name/version, save directory, display server, scene, pause/time-scale/tick-rate state. Its observer returns the same information.                                                                                                                                                              |
+| `SceneTree`        | `current()` — root/current scene refs. `query({root?,name?:glob,class?:nativeClass,internal?:false,offset?:0,limit?:100})` — breadth-first live node records with node reference, name, path, class, groups and parent. Returns `{nodes, more}`; offsets count matching nodes, including the root if it matches. |
+| `Object`           | `inspect({target})` — property/method/signal metadata. `get({target,property})`, `set({target,property,value})`, `call({target,method,args?:[]})`.                                                                                                                                                               |
+| `Screen`           | `viewports()` — up to 100 live viewports. `dimensions({viewport?})` — logical/texture sizes. `capture({viewport?})` — PNG base64, capture ID, viewport, width/height, MIME, timing. Root window is default.                                                                                                      |
+| `Script`           | `evaluate({source,bindings?:{}})` — compile a RefCounted evaluator and return its synchronous native result.                                                                                                                                                                                                     |
+| `Input`            | `actions()`, `press(input)`, `release(input)`, `move_mouse({relative?,position?})`, `move_mouse_to({position,duration_ms,from?})`, `scroll({vertical?,horizontal?,position?})`, `sequence({ticks,events,max_wall_ms?})`, `status({action})`, `cancel({action})`.                                                 |
+| `PropertyRecorder` | Captures and one-shot readings inside Godot. See [recording](recording.md) for operations, selectors and lifecycle.                                                                                                                                                                                              |
 
 Runtime `engine` metadata uses ordinary string keys and includes `name`, `major`,
 `minor` and `patch` alongside Godot's remaining version fields. `save_directory`
@@ -158,14 +163,14 @@ oversized values, and invalid native encodings fail explicitly.
 
 ### Input and bounded execution
 
-An input descriptor contains exactly one of:
+An input descriptor selects one InputMap action, key or mouse button.
 
-```js
-{ action: 'move_forward', strength: 0.7 } // Existing InputMap action; default 1.
-{ key: 'W', physical: true }            // OS key name; logical by default.
-{ key: 'A', ctrl: true }                // shift/ctrl/alt/meta are event flags.
-{ button: 'left', position: vector2 }   // left/right/middle; position optional.
-```
+| Example                                   | Meaning                                                                    |
+| ----------------------------------------- | -------------------------------------------------------------------------- |
+| `{action: 'move_forward', strength: 0.7}` | An existing InputMap action. Strength defaults to 1.                       |
+| `{key: 'W', physical: true}`              | A physical key. Key names use logical keys by default.                     |
+| `{key: 'A', ctrl: true}`                  | A key with a modifier flag. Available flags are shift, ctrl, alt and meta. |
+| `{button: 'left', position: vector2}`     | Left, right or middle mouse button at an optional position.                |
 
 Keys have no automatic repeat; presses are not text composition. Modifier flags
 are not separate held modifier-key events. InputEventAction, InputEventKey, and

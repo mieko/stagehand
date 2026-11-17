@@ -1,21 +1,24 @@
 # Security
 
-Choose builtins according to what you want a connected client to be able to do.
-**Enable Object, Script or PropertyRecorder only for clients you trust to run code on your machine.**
-They can read and write the same files and start the same programs that the game can,
-subject to the game's operating-system permissions.
+A Stagehand connection can carry anything from a single game-defined action to
+full debugger access. Your startup code chooses the available operations. Calling
+`enable_builtins()` with no arguments gives every authenticated client **arbitrary
+code execution in the game process**. A client can change game state, read and
+write files and launch programs with the game's operating-system permissions.
+A separate game profile selects where ordinary saves go. It places no restriction
+on files a script can open.
 
 ## What each builtin lets a client do
 
-| Builtin | What a connected client can do |
-| --- | --- |
-| Registry | List the objects, operations and events you have exposed. Always present. |
-| Runtime | Read engine version, save-directory path, timing settings and the current scene reference. |
-| SceneTree | Find nodes and read their names, paths, classes and groups; receive references to them. |
-| Screen | Take screenshots of game viewports and read their dimensions. |
-| Input | Press keys and mouse buttons, send mouse motion and wheel events, and trigger InputMap actions. This can play the game and operate its menus. |
-| Object | Read and change properties, call methods and listen to native signals on reachable game objects. Treat this as letting the client run code. |
-| Script | Run supplied GDScript inside the game. |
+| Builtin          | What a connected client can do                                                                                                                                                                      |
+| ---------------- | --------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| Registry         | List the objects, operations and events you have exposed. Always present.                                                                                                                           |
+| Runtime          | Read engine version, save-directory path, timing settings and the current scene reference.                                                                                                          |
+| SceneTree        | Find nodes and read their names, paths, classes and groups; receive references to them.                                                                                                             |
+| Screen           | Take screenshots of game viewports and read their dimensions.                                                                                                                                       |
+| Input            | Press keys and mouse buttons, send mouse motion and wheel events, and trigger InputMap actions. This can play the game and operate its menus.                                                       |
+| Object           | Read and change properties, call methods and listen to native signals on reachable game objects. Treat this as letting the client run code.                                                         |
+| Script           | Run supplied GDScript inside the game.                                                                                                                                                              |
 | PropertyRecorder | Read properties and invoke supplied method names on live references; run supplied readings when Script is enabled too. A "getter" can have side effects. Treat this as letting the client run code. |
 
 Runtime, SceneTree and Screen provide inspection, not general property writes,
@@ -90,7 +93,7 @@ For remote access, use a trusted network or an encrypted tunnel/TLS termination.
 
 Calls, getters and scripts run on the game's main thread. An endless loop or
 blocking call can freeze the game and its connector. A timeout cannot interrupt
-that code. Message and connection limits do not make untrusted scripts safe to run.
+that code or roll back changes already made. Message and connection limits do not make untrusted scripts safe to run.
 
 A timeout or lost connection also does not mean an action failed to happen.
 Do not automatically replay an uncertain action. Game-owned operations must

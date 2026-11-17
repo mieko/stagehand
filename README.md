@@ -1,17 +1,30 @@
 # Stagehand
 
-A pure GDScript addon for Godot 4.5+. It provides external bots, automated tests
-and interactive agents with a persistent, authenticated WebSocket connection.
+Inspect and control a running Godot game over a JSON WebSocket. Use it to test a
+menu, drive a character with a bot or agent, or debug a live scene from a REPL.
+You can query nodes, subscribe to signals, send input and capture a viewport.
+You can also expose game-specific actions so a client can ask to play a card or
+start a level by name.
 
-Expose your own game objects and high-level operations, alongside optional builtins
-for scene inspection, events, screenshots and synthetic input.
-It starts explicitly from your game's code.
+The addon is pure GDScript. A client can inspect a running game much like
+browser DevTools can inspect a page. Stagehand speaks its own
+[JSON-RPC protocol](docs/protocol.md).
 
 ## Add it to a Godot project
 
-Copy `addons/stagehand` into your project's `addons/` directory.
+Clone the repository and copy the addon into your project:
 
-Create the bridge explicitly from your game's startup code:
+```sh
+git clone https://github.com/mieko/stagehand.git
+mkdir -p /path/to/game/addons
+cp -R stagehand/addons/stagehand /path/to/game/addons/
+```
+
+Create the bridge from a startup node. The example enables all optional builtins
+when the game's environment contains a nonempty `STAGEHAND_TOKEN`.
+**Every authenticated client can then execute arbitrary code in the game
+process.** Share the token only with clients you trust with the game's
+operating-system permissions. See [security](docs/security.md).
 
 ```gdscript
 const Stagehand = preload("res://addons/stagehand/bridge.gd")
@@ -32,88 +45,66 @@ func _ready() -> void:
 	if error != OK:
 		bridge.queue_free()
 		push_error(error_string(error))
-
 		return
 
 	print("Stagehand port: ", bridge.get_port())
 ```
 
-The addon does nothing merely because its files are present. Keep the bridge node
-under an intentionally persistent node if connections should survive scene changes.
-Removing it closes connections and releases its synthetic inputs. You may omit
-builtins or enable a selected subset.
+Launch the game from a shell with a private token in its environment. For
+example, with Node.js installed, generate a fresh token in the shell you will
+use for the game and client:
 
-`enable_builtins()` enables all optional builtin endpoints:
+```sh
+export STAGEHAND_TOKEN="$(node -p "require('node:crypto').randomBytes(32).toString('hex')")"
+```
 
-| Name | Exposes |
-| --- | --- |
-| `Runtime` | Engine version, current scene, pause state and timing settings. |
-| `SceneTree` | Current scene/root references and node queries. |
-| `Object` | Property inspection, reads/writes, method calls and arbitrary native-signal subscriptions. |
-| `Screen` | Viewport discovery, dimensions and screenshots. |
-| `Input` | Synthetic keyboard, mouse and InputMap actions, including bounded sequences. |
-| `Script` | Runtime GDScript evaluation; enables conditional input when Input is selected too. |
-| `PropertyRecorder` | Capture native or scripted readings inside Godot for later retrieval. |
-
-Pass only the names you want, for example
-`bridge.enable_builtins(["Runtime", "Screen", "Input"])`. Call it once with the
-desired set; later calls do not add or replace endpoints. Pass `[]`, or omit the
-call entirely, to expose `Registry` and the game-owned objects you register yourself.
-
-Only enable Object, Script or PropertyRecorder for clients you trust to run code on your machine.
-Input can play the game and operate its menus.
-See [security](docs/security.md) for what each builtin lets a client do.
-
-The listener defaults to loopback. See
-[remote connections](addons/stagehand/README.md#remote-connections) for binding and
-transport options.
+Port `0` chooses an available loopback port. Keep the node alive across scene
+changes if clients should stay connected. Removing the bridge closes its connections and releases held synthetic input.
+See the [addon guide](addons/stagehand/README.md) for setup and remote connections.
 
 ## Connect from JavaScript
 
-Node 22+ provides the required WebSocket implementation; the client has no npm
-dependencies. It's only a few hundred straightforward lines of JavaScript, and
-the WebSocket/JSON-RPC protocol makes it simple to port to another language with
-WebSocket support. Use the printed port in the URL, then retain the connection:
+From the Stagehand checkout, launch `node` (22 or newer) with the same token in
+its environment. Substitute the port printed by the game:
 
 ```js
-import { connect } from './client/client.mjs';
-
+const { connect } = await import('./client/client.mjs');
 const game = await connect('ws://127.0.0.1:49152', {
   token: process.env.STAGEHAND_TOKEN,
 });
-
 const tree = await game.builtin('SceneTree');
-console.log(await tree.current());
-// => { root: RemoteObject { id: '…', … }, scene: RemoteObject { id: '…', … } }
-// Reuse game for later calls, then game.close().
+console.log((await tree.query({ class: 'Camera3D' })).nodes.map((node) => node.path));
 ```
 
-An environment without a global WebSocket can supply `{WebSocket: constructor}`.
-Ordinary Node scripts, persistent JS sessions and bots use the same API.
+Reuse the connection for later calls, then call `game.close()`. The small JS client
+has no npm dependencies. To write a client in another language, use its WebSocket
+and JSON libraries. The [wire reference](docs/protocol.md) describes the handshake,
+requests, events and encoding of Godot values.
 
-`Registry` is an always-present root for discovery, independent of optional builtins:
+## Choose what to expose
 
-```js
-const registry = await game.builtin('Registry');
+Every bridge provides a `Registry` for discovering registered objects, their
+operations and events. To select a subset of builtins, specify it once during
+startup, for example `bridge.enable_builtins(["SceneTree", "Screen"])`.
+Omitting the call leaves only the Registry and the objects you register.
 
-for (const object of await registry.list()) {
-  console.log(object.label, object.kind);
-}
-// => Registry Registry
-// => Runtime Runtime
-// => …
-```
+| Builtin            | Use                                                                                     |
+| ------------------ | --------------------------------------------------------------------------------------- |
+| `Runtime`          | Read engine information, pause state and timing settings.                               |
+| `SceneTree`        | Find nodes and get references to the root and current scene.                            |
+| `Screen`           | Find viewports and capture screenshots.                                                 |
+| `Input`            | Send keyboard, mouse or InputMap events and schedule input sequences.                   |
+| `Object`           | Read and write properties, call methods and subscribe to native signals.                |
+| `Script`           | Evaluate GDScript. With Input enabled, hold input until a game-state condition matches. |
+| `PropertyRecorder` | Sample properties and getters inside Godot, then retrieve the recording.                |
 
-Discovery describes each root's operations, events and optional contract version.
+For examples of input and sampling inside the game, see [conditional
+input](docs/protocol.md#conditional-input) and [recording](docs/recording.md).
 
-See [usage and registration](addons/stagehand/README.md),
-[wire protocol](docs/protocol.md), [the executable example](client/examples.mjs),
-and [development/testing](docs/development.md).
+## Expose a game operation
 
-## Expose your own objects
-
-After creating the bridge, register an existing object and the operations you want
-clients to call. Here, `self` is the current node:
+Register a game object on the bridge and name the operations clients may call.
+Each callback receives a Dictionary of named arguments:
 
 ```gdscript
 var operations := {
@@ -123,32 +114,12 @@ var operations := {
 bridge.register_object(self, "Greeter", "example", operations)
 ```
 
-Each operation receives a Dictionary of named parameters and returns a result.
-The connected JS client can discover the object and call it:
-
 ```js
 const greeter = await game.findObject('Greeter');
-
-console.log(await greeter.invoke('hello'));
-// => Hello from Godot!
+console.log(await greeter.invoke('hello')); // Hello from Godot!
 ```
 
-See [registration details](addons/stagehand/README.md#registering-game-owned-objects)
-for observations, events and object lifetimes, and
-[wrapper factories](client/README.md#wrapper-factories) to add convenient JavaScript
-methods for your object's kind.
-
-## React to game state inside Godot
-
-Select both `Script` and `Input` to hold input until a game-state condition matches,
-without a client round trip per sample. The condition runs as ordinary GDScript
-inside the game, with a simulation-time limit and automatic input release.
-See the [JavaScript example](client/README.md#gdscript-predicates) and
-[conditional-input contract](docs/protocol.md#conditional-input).
-
-## Record measurements
-
-Select `PropertyRecorder` to sample native properties, indexed paths or synchronous
-getters inside Godot, then retrieve retained pages for plotting. Selecting Script too
-allows derived readings through the same GDScript evaluator. See
-[recording](docs/recording.md) for selectors, sampling phases and capture limits.
+See [object registration](addons/stagehand/README.md#registering-game-owned-objects)
+for observations, events and handle lifetimes. The [client guide](client/README.md)
+covers JS wrappers, input completion and cancellation. See the [client example](client/examples.mjs)
+and [development and compatibility guide](docs/development.md) for fixture usage and engine versions.
