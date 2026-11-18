@@ -1,11 +1,13 @@
 extends RefCounted
 ## Object references stay live handles; native value types use Godot's JSON codec.
 
+const Failure = preload("failure.gd")
+
 var bridge: Node
 var _native_codec: RefCounted
 var _from_native: Callable
 var _to_native: Callable
-const Failure = preload("failure.gd")
+
 const COMPONENTS := {
 	"Vector2": 2,
 	"Vector2i": 2,

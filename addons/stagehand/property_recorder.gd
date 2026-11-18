@@ -2,6 +2,12 @@ extends Node
 ## One bounded, in-memory capture of readings at a shared Godot callback boundary.
 ## Internal names are interned; protocol dictionaries retain String keys.
 
+const Buffer = preload("property_recording_buffer.gd")
+const Reader = preload("property_reader.gd")
+const Codec = preload("values.gd")
+const Failure = preload("failure.gd")
+const ScriptEndpoint = preload("script.gd")
+
 enum State {
 	EMPTY,
 	RECORDING,
@@ -40,10 +46,6 @@ const STOP_REASON_NAMES := [
 	"endpoint_removed",
 ]
 
-const Buffer = preload("property_recording_buffer.gd")
-const Reader = preload("property_reader.gd")
-const Codec = preload("values.gd")
-const Failure = preload("failure.gd")
 const MAX_TRACKS := 32
 const MAX_SAMPLES := 10000
 const MAX_BYTES := Buffer.MAX_BYTES
@@ -51,7 +53,7 @@ const MAX_SAMPLE_BYTES := Buffer.MAX_SAMPLE_BYTES
 const PAGE_SIZE := 32
 
 var _bridge: Node
-var _codec: RefCounted
+var _codec: Codec
 var _handle := ""
 var _tracks: Array[Dictionary] = []
 var _buffer: Buffer
@@ -69,7 +71,7 @@ var _started_usec := 0
 var _stopped_usec := 0
 var _stop_reason: StopReason = StopReason.NONE
 var _error: Dictionary = { }
-var _scripts: RefCounted
+var _scripts: ScriptEndpoint
 var _admitting := false
 var _closing := false
 
@@ -82,7 +84,7 @@ func _ready() -> void:
 	set_physics_process(false)
 
 
-func install(bridge: Node, scripts: RefCounted = null) -> void:
+func install(bridge: Node, scripts: ScriptEndpoint = null) -> void:
 	_bridge = bridge
 	_scripts = scripts
 	_codec = Codec.new(bridge)

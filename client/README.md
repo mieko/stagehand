@@ -1,8 +1,11 @@
 # JavaScript client
 
-Import `connect`, `GodotValue` and `RpcError` from `client.mjs`, or import the local
-package `godot-stagehand`. Node 22+ provides a built-in WebSocket. A runtime without a
-global WebSocket can pass a constructor in `connect(url, {token, WebSocket})`.
+Import `client/client.mjs` from the Stagehand checkout or use your game's local
+client package. If all you have is a game address, you can download
+`/client.mjs` when the game serves it. The client runs as one module in Node
+22 or newer. The core module exports `connect`,
+`GodotValue` and `RpcError`. A runtime without a
+global WebSocket can pass a constructor in `connect(address, {token, WebSocket})`.
 Keep a client connected to reuse handles and subscriptions; call `close()` when done.
 
 See the [wire protocol](../docs/protocol.md) for message and value formats when
@@ -31,7 +34,8 @@ It's a convenience for required named endpoints, including ordinary game-owned
 registrations. Builtins use their names as both label and kind; for example,
 `findObject('Input')` and `builtin('Input')` both use the default `Input` wrapper.
 
-`connect(url, { token })` accepts a local or remote WebSocket URL. Remote use
+`connect(address, { token })` accepts the game's HTTP or HTTPS base address,
+such as `http://localhost:49152`. The client opens WebSocket at `/rpc`. Remote use
 requires an explicit [game-side bind address](../addons/stagehand/README.md#remote-connections).
 
 See the [addon usage guide](../addons/stagehand/README.md) for game-side setup and
@@ -153,7 +157,7 @@ Wrapper factories are optional: ordinary remote objects already support `invoke(
 literal mapping remote types to synchronous wrapper functions:
 
 ```js
-const game = await connect(url, {
+const game = await connect(address, {
   token,
   wrappers: {
     Dingus: (remote) => ({
@@ -180,7 +184,7 @@ For methods that simply forward named parameters, use `forwardMethods`:
 ```js
 import { connect, forwardMethods } from './client.mjs';
 
-const game = await connect(url, {
+const game = await connect(address, {
   token,
   wrappers: {
     example: forwardMethods(['hello']),
@@ -209,7 +213,7 @@ To add consumer methods while retaining Stagehand's builtin helpers, extend the
 wrapper you receive:
 
 ```js
-const game = await connect(url, {
+const game = await connect(address, {
   token,
   wrappers: {
     Input: (input) =>

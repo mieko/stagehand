@@ -565,7 +565,7 @@ test('constructor-side shutdown cannot admit work for the departed peer', async 
 
 test('shutdown inside a raw RPC batch retires the remaining batch items', async () => {
   const isolated = await launchFixture({builtins: ['Script', 'Input']});
-  const socket = new WebSocket(isolated.url);
+  const socket = new WebSocket(isolated.rpcUrl);
   await once(socket, 'open');
 
   try {

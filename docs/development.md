@@ -3,8 +3,12 @@
 The addon is pure GDScript. The integration runner is external Node 22+ code;
 it stages a temporary copy of the standalone fixture and addon, uses an ephemeral
 port/private token, and cleans its own process, files and macOS user directory.
-It never launches a consuming game's main project. Rendered fixture windows are
-offscreen and do not take focus; synthetic events do not warp the OS pointer.
+It never launches a consuming game's main project. Tests run headless by default.
+Rendered fixture windows are offscreen, but launching Godot graphically can
+still activate the app and take keyboard focus on macOS.
+
+Tests import the client from the checkout. A focused transport check downloads
+the served module and connects with it to verify distribution.
 
 ## Run the checks
 
@@ -19,8 +23,7 @@ supply an editor and matching release-template executable:
 
 ```sh
 STAGEHAND_GODOT=/path/to/Godot \
-STAGEHAND_RELEASE=/path/to/release-template \
-STAGEHAND_GRAPHICAL=1 npm test
+STAGEHAND_RELEASE=/path/to/release-template npm test
 ```
 
 Recorder memory measurements require an engine exposing static-memory counters;
@@ -28,7 +31,8 @@ release engines without them report that measurement as unavailable. Capture,
 encoding, lifecycle and retrieval checks still run.
 
 The runner exports a fixture PCK, copies the template beside it and runs it without
-an editor/debugger connection. Graphical checks decode PNGs and inspect fixture
+the project source or an editor/debugger connection. Set `STAGEHAND_GRAPHICAL=1`
+when you want rendered checks and the desktop is available. These checks decode PNGs and inspect fixture
 colors before and after input. Test files run serially because parallel Godot
 exports can overwrite shared temporary output.
 

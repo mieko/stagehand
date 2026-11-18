@@ -57,7 +57,7 @@ test('core roots advertise their API versions', async () => {
     Runtime: '2.0.0',
     SceneTree: '2.0.0',
     Object: '1.0.0',
-    Screen: '1.0.0',
+    Screen: '1.1.0',
     Input: '1.1.0',
     Script: '1.0.0',
     PropertyRecorder: '1.0.0',
@@ -863,8 +863,26 @@ test(
   },
 );
 
+test('a native capture larger than one RPC message returns the full PNG', {
+  skip: !graphical, timeout: 30_000,
+}, async () => {
+  const screen = await client.builtin('Screen');
+  const viewport = await client.object(objects[0].id).invoke('noisy_viewport');
+  try {
+    const capture = await screen.capture({ viewport });
+    assert.equal(capture.width, 2048);
+    assert.equal(capture.height, 2048);
+    assert.ok(capture.image.toString('base64').length > 8 * 1024 * 1024);
+    assert.equal(capture.image.subarray(0, 8).toString('hex'), '89504e470d0a1a0a');
+    assert.equal(capture.image.subarray(-12).toString('hex'), '0000000049454e44ae426082');
+    assert.ok((await client.objects()).some(object => object.label === 'Screen'));
+  } finally {
+    await viewport.call('queue_free');
+  }
+});
+
 test('wire validation distinguishes malformed requests, notifications, and batches', async () => {
-  const socket = new WebSocket(url);
+  const socket = new WebSocket(fixture.rpcUrl);
   await once(socket, 'open');
 
   const exchange = async (value) => {
@@ -876,6 +894,7 @@ test('wire validation distinguishes malformed requests, notifications, and batch
 
   try {
     assert.equal((await exchange('{')).error.code, -32700);
+    assert.equal((await exchange('{}\0')).error.code, -32700);
     assert.equal((await exchange(1)).error.code, -32600);
     assert.equal(
       (await exchange({ jsonrpc: '2.0', id: 'unauth', method: 'objects.list' })).error.code,

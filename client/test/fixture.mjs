@@ -1,7 +1,7 @@
 import assert from 'node:assert/strict';
 import { once } from 'node:events';
 import { spawn, spawnSync } from 'node:child_process';
-import { mkdtemp, cp, rm, readFile, writeFile } from 'node:fs/promises';
+import { mkdtemp, mkdir, cp, rm, readFile, writeFile } from 'node:fs/promises';
 import { tmpdir, homedir } from 'node:os';
 import { basename, join } from 'node:path';
 import { fileURLToPath } from 'node:url';
@@ -12,9 +12,9 @@ const godot = process.env.STAGEHAND_GODOT ?? 'godot';
 
 export async function launchFixture({
   builtins, fixture = 'fixture', bindAddress, expectedErrors = [], strictDeclarations,
+  token = randomBytes(24).toString('hex'),
 } = {}) {
   const directory = await mkdtemp(join(tmpdir(), 'stagehand-test-'));
-  const token = randomBytes(24).toString('hex');
   let child,
     output = '';
   const unexpectedErrors = () => output.split('\n').filter(line =>
@@ -46,6 +46,12 @@ export async function launchFixture({
 
     await cp(join(repo, 'tests/fixture/export_presets.cfg'), join(directory, 'export_presets.cfg'));
 
+    if (fixture === 'transport') {
+      const served = join(directory, 'served');
+      await cp(join(repo, 'client/client.mjs'), join(served, 'client.mjs'));
+      await cp(join(repo, 'docs/protocol.md'), join(served, 'api.md'));
+    }
+
     const project = join(directory, 'project.godot');
     await writeFile(
       project,
@@ -59,7 +65,9 @@ export async function launchFixture({
     let binary = godot;
     let args = ['--headless', '--audio-driver', 'Dummy', '--path', directory];
     if (process.env.STAGEHAND_RELEASE) {
-      const pack = join(directory, 'fixture.pck');
+      const runtime = join(directory, 'release');
+      await mkdir(runtime);
+      const pack = join(runtime, 'fixture.pck');
       const exported = spawnSync(
         godot,
         ['--headless', '--path', directory, '--export-pack', 'Stagehand Fixture', pack],
@@ -70,7 +78,7 @@ export async function launchFixture({
       );
 
       assert.equal(exported.status, 0, `Export failed:\n${exported.stdout}\n${exported.stderr}`);
-      binary = join(directory, 'fixture');
+      binary = join(runtime, 'fixture');
       await cp(process.env.STAGEHAND_RELEASE, binary);
       args = ['--headless', '--audio-driver', 'Dummy'];
     }
@@ -85,7 +93,7 @@ export async function launchFixture({
       },
     });
 
-    const url = await new Promise((resolve, reject) => {
+    const addresses = await new Promise((resolve, reject) => {
       const timer = setTimeout(
         () => reject(new Error(`Fixture did not start:\n${output}`)),
         15_000,
@@ -109,7 +117,8 @@ export async function launchFixture({
             host = '::1';
           }
 
-          resolve(`ws://${host.includes(':') ? `[${host}]` : host}:${match[1]}`);
+          const authority = `${host.includes(':') ? `[${host}]` : host}:${match[1]}`;
+          resolve({ url: `http://${authority}`, rpcUrl: `ws://${authority}/rpc` });
         }
       };
       child.stdout.on('data', collect);
@@ -145,7 +154,7 @@ export async function launchFixture({
       check();
     });
 
-    return { url, token, stop, output: () => output, waitForOutput };
+    return { ...addresses, token, stop, output: () => output, waitForOutput };
   } catch (error) {
     await stop().catch(() => {});
 

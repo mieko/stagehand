@@ -30,7 +30,7 @@ func _ready() -> void:
 
 		return
 
-	print("Stagehand port: ", bridge.get_port())
+	print("Stagehand address: http://127.0.0.1:", bridge.get_port())
 ```
 
 Nothing starts merely because the addon is present. For scene transitions, put the
@@ -78,10 +78,75 @@ or PropertyRecorder only for clients you trust to run code on your machine. Use 
 unpredictable launch token; the listener defaults to `127.0.0.1`.
 See [security](../../docs/security.md) for what each builtin lets a client do.
 
+## Serve the matching client and API reference
+
+Put a self-contained Node.js 22+ module at `stagehand/client.mjs` in your Godot
+project. For the core API, copy `client/client.mjs` from the Stagehand revision
+you ship. Put the Stagehand reference at `stagehand/api.md`. If your game has
+its own API or workflows, put its quick start and reference in `stagehand/game.md`.
+
+Include `stagehand/client.mjs,stagehand/api.md,stagehand/game.md` in the export
+preset's non-resource file filter. Omit the third path if you have no game
+reference. Pass the paths to the bridge before starting the listener.
+
+```gdscript
+bridge.app_name = "My Game"
+var error := bridge.serve_client(
+	"res://stagehand/client.mjs",
+	"res://stagehand/api.md",
+	"res://stagehand/game.md",
+)
+if error == OK:
+	error = bridge.start(token, 0)
+```
+
+The Markdown index at `/` links to the client at `/client.mjs`, the Stagehand
+reference at `/api.md`, and the optional game reference at `/game.md`. These
+downloads are public to clients that can reach the listener. The game reference
+can link to the Stagehand reference as `./api.md`. Pass the same base address
+to `connect()` for RPC at `/rpc`.
+
+Set `app_name` before `start()` to display your app's name on the discovery
+page. An empty name uses “this game.”
+
+### Bundle a game-specific client
+
+With a pinned Stagehand checkout beside your game project, save this entry
+point as `game-client.mjs` in the project root. It adds a method for the
+[Greeter example](../../README.md#expose-a-game-operation).
+
+```js
+import { connect as connectStagehand, forwardMethods } from '../stagehand/client/client.mjs';
+
+export function connect(address, options = {}) {
+  return connectStagehand(address, {
+    ...options,
+    wrappers: {
+      example: forwardMethods(['hello']),
+      ...options.wrappers,
+    },
+  });
+}
+```
+
+Run the bundle command from the Godot project root with esbuild available as a
+development tool.
+
+```sh
+npx esbuild game-client.mjs --bundle --platform=node --format=esm \
+  --outfile=stagehand/client.mjs
+```
+
+The bundle includes the modules your entry point imports. Node provides its
+own built-ins. Package the output with the game, and users can download and
+import that one file. [esbuild's Node guide](https://esbuild.github.io/getting-started/#bundling-for-node)
+
 ## Remote connections
 
 `start(token, port = 0, bind_address = "127.0.0.1")` keeps remote access opt-in.
-Use Godot's `"*"` convention to listen on all IPv4 and IPv6 interfaces. For a
+`"localhost"` listens on both available loopback families using the same port and
+bridge instance. If either available family cannot bind, startup fails without
+leaving a partial listener. Use Godot's `"*"` convention to listen on all IPv4 and IPv6 interfaces. For a
 narrower binding, use `"0.0.0.0"` for IPv4 only, `"::"` for IPv6 only, or a specific
 interface IP. Port `0` still selects an available port, returned by `get_port()`.
 
@@ -94,40 +159,44 @@ var error := bridge.start(token, 49152, "*")
 The client connects using the game's reachable hostname or IP, with the same token:
 
 ```js
-const game = await connect('ws://game-host:49152', {
+const game = await connect("http://game-host:49152", {
   token: process.env.STAGEHAND_TOKEN,
 });
 ```
 
-The addon serves plain `ws://`, which does not encrypt the token or traffic. Use a
+The addon serves plain HTTP and WebSocket, which do not encrypt the token or traffic. Use a
 trusted network or an encrypted tunnel; for TLS termination in front of the addon,
-the client can use a `wss://` URL.
+the client can use the proxy's `https://` base address.
+
+`start("", port, address)` explicitly disables token checks; the client can omit
+`token`. The listener rejects browser-origin WebSocket connections in either
+mode. With an empty token, native clients that can reach the port can use the
+registered operations. See [security](../../docs/security.md).
 
 ## JavaScript
 
-Use Node 22+ with its built-in WebSocket; no npm dependencies are required. The
-source package lives at `client/` in this repository. This example assumes a
-`move_forward` InputMap action and a rendered viewport. Use the printed port in the URL:
+Use Node 22+ and the [downloaded or copied client module](../../README.md#connect-from-javascript).
+This example assumes a `move_forward` InputMap action and a rendered viewport.
 
 ```js
-import { connect } from './client/client.mjs';
-import { writeFile } from 'node:fs/promises';
+import { connect } from "./stagehand-client.mjs";
+import { writeFile } from "node:fs/promises";
 
-const game = await connect('ws://127.0.0.1:49152', {
+const game = await connect("http://127.0.0.1:49152", {
   token: process.env.STAGEHAND_TOKEN,
 });
 
 try {
-  const input = await game.builtin('Input');
+  const input = await game.builtin("Input");
   const movement = await input.sequence({
     ticks: 12,
-    events: [{ at_tick: 0, pressed: true, input: { action: 'move_forward' } }],
+    events: [{ at_tick: 0, pressed: true, input: { action: "move_forward" } }],
   });
   console.log(movement.reason); // => sequence_exhausted
 
-  const screen = await game.builtin('Screen');
+  const screen = await game.builtin("Screen");
   const capture = await screen.capture();
-  await writeFile('/tmp/stagehand.png', capture.image);
+  await writeFile("/tmp/stagehand.png", capture.image);
 } finally {
   game.close();
 }

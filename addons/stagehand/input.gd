@@ -5,22 +5,24 @@ const Failure = preload("failure.gd")
 const Values = preload("values.gd")
 const InputPlan = preload("input_plan.gd")
 const InputDevice = preload("input_device.gd")
+const ScriptEndpoint = preload("script.gd")
+const WebSocket = preload("websocket.gd")
 
 var bridge: Node
 var handle: String
-var _writer: WebSocketPeer
+var _writer: WebSocket
 var _manual: Dictionary = { }
 var _held: Dictionary = { }
 var _operation: Dictionary = { }
 var _last_result: Dictionary = { }
 var _next_action := 0
-var _device: RefCounted
-var _scripts: RefCounted
+var _device: InputDevice
+var _scripts: ScriptEndpoint
 var _closing := false
-var _values: RefCounted
+var _values: Values
 
 
-func _init(owner: Node, scripts: RefCounted = null) -> void:
+func _init(owner: Node, scripts: ScriptEndpoint = null) -> void:
 	bridge = owner
 	_scripts = scripts
 	_values = Values.new(owner)
@@ -93,7 +95,7 @@ func _claim() -> Variant:
 			"Input is releasing the previous operation's holds",
 		)
 
-	var peer: WebSocketPeer = bridge.request_peer()
+	var peer: WebSocket = bridge.request_peer()
 	if peer == null:
 		return bridge.fail(
 			Failure.AUTHENTICATION_FAILED,
@@ -603,7 +605,7 @@ func cancel(params: Dictionary) -> Variant:
 	return _last_result
 
 
-func _disconnected(peer: WebSocketPeer) -> void:
+func _disconnected(peer: WebSocket) -> void:
 	if peer != _writer:
 		return
 

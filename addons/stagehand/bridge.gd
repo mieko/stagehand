@@ -1,21 +1,28 @@
 extends Node
 ## Explicitly started Stagehand connection; no editor or debugger is required.
 
-signal connection_closed(peer: WebSocketPeer)
+signal connection_closed(peer: WebSocket)
 
-const PROTOCOL_VERSION := 1
-const MAX_PACKETS_PER_FRAME := 64
-const MAX_MESSAGE_BYTES := 8 * 1024 * 1024
-const MAX_PEERS := 8
 const Values = preload("values.gd")
 const Failure = preload("failure.gd")
 const Builtins = preload("builtins.gd")
 const Compatibility = preload("compatibility.gd")
+const Listener = preload("listener.gd")
+const Http = preload("http.gd")
+const WebSocket = preload("websocket.gd")
 
+const PROTOCOL_VERSION := 1
+const MAX_PEERS := 8
+const AUTH_TIMEOUT_MS := 5000
+
+## Display name for HTTP discovery. Set before calling start().
+var app_name := ""
 var native_codec: RefCounted
 var signal_factory: GDScript
 
-var _server := TCPServer.new()
+var _server := Listener.new()
+var _assets: Dictionary = { }
+var _http: Http
 var _rpc := JSONRPC.new()
 var _peers: Dictionary = { }
 var _objects: Dictionary = { }
@@ -23,10 +30,10 @@ var _next_object := 0
 var _next_subscription := 0
 var _token := ""
 var _instance := ""
-var _values: RefCounted
-var _builtins: RefCounted
+var _values: Values
+var _builtins: Builtins
 var _builtin_names: Array[String] = []
-var _request_peer: WebSocketPeer
+var _request_peer: WebSocket
 var _scene_id := 0
 var _world_generation := 0
 var _registry_handle := ""
@@ -53,7 +60,7 @@ func _init() -> void:
 
 
 func start(token: String, port: int = 0, bind_address: String = "127.0.0.1") -> Error:
-	if token.is_empty() or _server.is_listening():
+	if _server.is_listening():
 		return ERR_INVALID_PARAMETER
 
 	var result := _server.listen(port, bind_address)
@@ -61,6 +68,7 @@ func start(token: String, port: int = 0, bind_address: String = "127.0.0.1") -> 
 		return result
 
 	_token = token
+	_http = Http.new(_assets, get_port(), bind_address, app_name)
 	set_process(true)
 
 	return OK
@@ -68,6 +76,38 @@ func start(token: String, port: int = 0, bind_address: String = "127.0.0.1") -> 
 
 func get_port() -> int:
 	return _server.get_local_port()
+
+
+## Serve the bundled client, Stagehand reference, and optional game reference.
+func serve_client(client_path: String, api_path: String, game_doc_path: String = "") -> Error:
+	if _server.is_listening():
+		return ERR_ALREADY_IN_USE
+
+	var files := {
+		"/client.mjs": [client_path, "text/javascript; charset=utf-8"],
+		"/api.md": [api_path, Http.MARKDOWN_MIME],
+	}
+	if not game_doc_path.is_empty():
+		files["/game.md"] = [game_doc_path, Http.MARKDOWN_MIME]
+
+	var assets: Dictionary = { }
+	for route: String in files:
+		var file := FileAccess.open(files[route][0], FileAccess.READ)
+		if file == null:
+			return FileAccess.get_open_error()
+
+		var length := file.get_length()
+		if length > WebSocket.MESSAGE_LIMIT:
+			return ERR_PARAMETER_RANGE_ERROR
+
+		var bytes := file.get_buffer(length)
+		if bytes.size() != length:
+			return ERR_FILE_CANT_READ
+
+		assets[route] = { "mime": files[route][1], "bytes": bytes }
+
+	_assets = assets
+	return OK
 
 
 func enable_builtins(names: PackedStringArray = Builtins.NAMES) -> Error:
@@ -100,11 +140,14 @@ func stop() -> void:
 	var peers := _peers.keys()
 	_peers.clear()
 	_server.stop()
+	_http = null
 	set_process(false)
 
-	for peer: WebSocketPeer in peers:
-		connection_closed.emit(peer)
+	for peer: WebSocket in peers:
 		peer.close(1001, "Stagehand connection stopped")
+		peer.poll()
+		peer.abort()
+		connection_closed.emit(peer)
 
 	_prune_signals()
 
@@ -154,11 +197,10 @@ func fail(code: int, message: String) -> Failure:
 	return Failure.new(code, message)
 
 
-func request_peer() -> WebSocketPeer:
+func request_peer() -> WebSocket:
 	if (
 		_request_peer == null or not _peers.has(_request_peer)
-		or not _peers[_request_peer].authenticated
-		or _request_peer.get_ready_state() != WebSocketPeer.STATE_OPEN
+		or not _peers[_request_peer].authenticated or _request_peer.state != WebSocket.State.OPEN
 	):
 		return null
 
@@ -292,7 +334,7 @@ func publish(handle: String, event: String, value: Variant, at: Dictionary = { }
 		return
 
 	var event_clock := _clock() if at.is_empty() else at
-	for peer: WebSocketPeer in _peers:
+	for peer: WebSocket in _peers:
 		var state: Dictionary = _peers[peer]
 		for subscription: String in state.subscriptions:
 			var entry: Dictionary = state.subscriptions[subscription]
@@ -365,63 +407,67 @@ func _clock() -> Dictionary:
 
 
 func _process(_delta: float) -> void:
-	if _server.is_connection_available():
-		var peer := WebSocketPeer.new()
-		peer.inbound_buffer_size = MAX_MESSAGE_BYTES
-		peer.outbound_buffer_size = MAX_MESSAGE_BYTES
-		var connection := _server.take_connection()
-		if _peers.size() >= MAX_PEERS:
-			connection.disconnect_from_host()
-		elif peer.accept_stream(connection) == OK:
-			_peers[peer] = {
-				"authenticated": false,
-				"subscriptions": { },
-				"connected_ms": Time.get_ticks_msec(),
-			}
+	_accept_connection()
 
-	for peer: WebSocketPeer in _peers.keys():
-		if not _peers.has(peer):
-			continue
-
-		peer.poll()
-		if peer.get_ready_state() == WebSocketPeer.STATE_CLOSED:
-			connection_closed.emit(peer)
-			_peers.erase(peer)
-			_prune_signals()
-			continue
-
-		if (
-			not _peers[peer].authenticated
-			and Time.get_ticks_msec() - _peers[peer].connected_ms > 5000
-		):
-			peer.close(1008, "Authentication deadline")
-
-		if peer.get_ready_state() != WebSocketPeer.STATE_OPEN:
-			continue
-
-		for packet: int in mini(peer.get_available_packet_count(), MAX_PACKETS_PER_FRAME):
-			if not _peers.has(peer):
-				break
-
-			var bytes := peer.get_packet()
-			if not peer.was_string_packet() or bytes.size() > MAX_MESSAGE_BYTES:
-				peer.close(1009, "Expected a bounded JSON text message")
-				break
-
-			var parser := JSON.new()
-			if parser.parse(bytes.get_string_from_utf8()) != OK:
-				_send(peer, _rpc.make_response_error(Failure.PARSE_ERROR, "Invalid JSON"))
-			else:
-				var response: Variant = _request(peer, parser.data)
-				if response != null:
-					_send(peer, response)
+	for peer: WebSocket in _peers.keys():
+		if _peers.has(peer):
+			_poll_peer(peer)
 
 	for handle: String in _objects.keys():
 		if _objects[handle].target.get_ref() == null:
 			unregister_object(handle)
 
 
-func _request(peer: WebSocketPeer, request: Variant) -> Variant:
+func _accept_connection() -> void:
+	var connection := _server.take_connection()
+	if connection == null:
+		return
+
+	if _peers.size() >= MAX_PEERS:
+		connection.disconnect_from_host()
+		return
+
+	var peer := WebSocket.new(connection, _http)
+	_peers[peer] = {
+		"authenticated": false,
+		"subscriptions": { },
+		"auth_deadline": Time.get_ticks_msec() + AUTH_TIMEOUT_MS,
+	}
+
+
+func _poll_peer(peer: WebSocket) -> void:
+	peer.poll()
+	if peer.state == WebSocket.State.CLOSED:
+		_peers.erase(peer)
+		connection_closed.emit(peer)
+		_prune_signals()
+		return
+
+	if peer.state != WebSocket.State.OPEN:
+		return
+
+	var session: Dictionary = _peers[peer]
+	if not session.authenticated and Time.get_ticks_msec() >= session.auth_deadline:
+		peer.close(1008, "Authentication deadline")
+		return
+
+	for bytes: PackedByteArray in peer.take_messages():
+		if not _peers.has(peer) or peer.state != WebSocket.State.OPEN:
+			break
+
+		var parser := JSON.new()
+		if bytes.find(0) >= 0 or parser.parse(bytes.get_string_from_utf8()) != OK:
+			_send(peer, _rpc.make_response_error(Failure.PARSE_ERROR, "Invalid JSON"))
+			continue
+
+		var response: Variant = _request(peer, parser.data)
+		if response != null:
+			_send(peer, response)
+
+	peer.flush()
+
+
+func _request(peer: WebSocket, request: Variant) -> Variant:
 	if request is Array:
 		if request.is_empty() or request.size() > 64:
 			return _rpc.make_response_error(
@@ -431,7 +477,7 @@ func _request(peer: WebSocketPeer, request: Variant) -> Variant:
 
 		var responses: Array = []
 		for item: Variant in request:
-			if not _peers.has(peer) or peer.get_ready_state() != WebSocketPeer.STATE_OPEN:
+			if not _peers.has(peer) or peer.state != WebSocket.State.OPEN:
 				break
 
 			var response: Variant = (
@@ -485,10 +531,10 @@ func _request(peer: WebSocketPeer, request: Variant) -> Variant:
 	return _rpc.make_response(encoded, id)
 
 
-func _dispatch(peer: WebSocketPeer, method: String, params: Dictionary) -> Variant:
+func _dispatch(peer: WebSocket, method: String, params: Dictionary) -> Variant:
 	var state: Dictionary = _peers[peer]
 	if method == "session.hello":
-		if params.get("token") != _token:
+		if not _token.is_empty() and params.get("token") != _token:
 			return Failure.new(Failure.AUTHENTICATION_FAILED, "Authentication failed")
 
 		if params.get("protocol", 1) != PROTOCOL_VERSION:
@@ -599,15 +645,15 @@ func _describe(handle: String) -> Dictionary:
 
 
 func _serialize(value: Variant) -> Variant:
-	var message := JSON.stringify(value)
-	if message.to_utf8_buffer().size() > MAX_MESSAGE_BYTES:
+	var message := JSON.stringify(value).to_utf8_buffer()
+	if message.size() > WebSocket.MESSAGE_LIMIT:
 		return fail(Failure.RESOURCE_LIMIT, "Message exceeds the 8 MiB transport limit")
 
 	return message
 
 
-func _send(peer: WebSocketPeer, value: Variant) -> void:
-	if peer.get_ready_state() != WebSocketPeer.STATE_OPEN:
+func _send(peer: WebSocket, value: Variant) -> void:
+	if peer.state != WebSocket.State.OPEN:
 		return
 
 	var message: Variant = _serialize(value)
@@ -615,7 +661,7 @@ func _send(peer: WebSocketPeer, value: Variant) -> void:
 		peer.close(1011, "Cannot deliver response")
 
 
-func _notify(peer: WebSocketPeer, method: String, params: Dictionary) -> void:
+func _notify(peer: WebSocket, method: String, params: Dictionary) -> void:
 	var encoded: Variant = _values.encode(params)
 	if encoded is Failure:
 		_send(
@@ -636,6 +682,6 @@ func _notify(peer: WebSocketPeer, method: String, params: Dictionary) -> void:
 
 
 func _broadcast(method: String, params: Dictionary) -> void:
-	for peer: WebSocketPeer in _peers:
+	for peer: WebSocket in _peers:
 		if _peers[peer].authenticated:
 			_notify(peer, method, params)

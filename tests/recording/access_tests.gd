@@ -2,10 +2,12 @@ extends RefCounted
 
 const Failure = preload("res://addons/stagehand/failure.gd")
 const PoseModifier = preload("res://pose_modifier.gd")
+const Recorder = preload("res://addons/stagehand/property_recorder.gd")
+const Fixture = preload("res://fixture.gd")
 
 var failures := 0
-var _fixture: Node3D
-var _recorder: Node
+var _fixture: Fixture
+var _recorder: Recorder
 
 
 class Original extends RefCounted:
@@ -17,7 +19,7 @@ class Replacement extends RefCounted:
 	pass
 
 
-func run(fixture: Node3D, recorder: Node) -> int:
+func run(fixture: Fixture, recorder: Recorder) -> int:
 	_fixture = fixture
 	_recorder = recorder
 

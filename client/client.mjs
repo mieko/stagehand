@@ -1,7 +1,5 @@
 import { EventEmitter } from 'node:events';
 
-export {gdPredicate} from './gdscript.mjs';
-
 const wrappedObjects = new WeakMap();
 
 export class GodotValue {
@@ -252,9 +250,31 @@ export class InputObject extends RemoteObject {
 
 export class ScreenObject extends RemoteObject {
   async capture(params = {}) {
-    const { base64, ...info } = await this.invoke('capture', params);
+    const { base64, byte_length: length, ...info } = await this.invoke('capture', params);
+    if (base64 !== undefined) {
+      return { ...info, image: Buffer.from(base64, 'base64') };
+    }
 
-    return { ...info, image: Buffer.from(base64, 'base64') };
+    if (!Number.isSafeInteger(length) || length <= 0) {
+      throw new Error('Invalid screenshot length');
+    }
+
+    const chunks = [];
+    let offset = 0;
+    while (offset < length) {
+      const page = await this.invoke('capture_chunk', { capture: info.capture, offset });
+      const chunk = Buffer.from(page.base64, 'base64');
+      if (
+        chunk.length === 0 || page.next_offset !== offset + chunk.length || page.next_offset > length
+      ) {
+        throw new Error('Invalid screenshot chunk');
+      }
+
+      chunks.push(chunk);
+      offset = page.next_offset;
+    }
+
+    return { ...info, image: Buffer.concat(chunks, length) };
   }
 }
 
@@ -359,10 +379,21 @@ export class StagehandClient extends EventEmitter {
   }
 
   static async connect(
-    url,
+    address,
     { token, timeoutMs = 10_000, WebSocket: Socket = globalThis.WebSocket, wrappers = {} } = {},
   ) {
-    const socket = new Socket(url);
+    const base = new URL(address);
+    if (base.protocol !== 'http:' && base.protocol !== 'https:') {
+      throw new TypeError('Stagehand address must start with http:// or https://');
+    }
+
+    if (base.pathname !== '/' || base.search || base.hash || base.username || base.password) {
+      throw new TypeError('Use the Stagehand base address without a path, query, fragment, or credentials');
+    }
+
+    const rpc = new URL('/rpc', base.origin);
+    rpc.protocol = base.protocol === 'https:' ? 'wss:' : 'ws:';
+    const socket = new Socket(rpc.href);
     const client = new StagehandClient(socket, { wrappers });
     await new Promise((resolve, reject) => {
       const timer = setTimeout(() => {
@@ -522,3 +553,65 @@ export class StagehandClient extends EventEmitter {
 }
 
 export const connect = StagehandClient.connect;
+
+const identifier = /^[_\p{XID_Start}][\p{XID_Continue}]*$/u;
+const reserved = new Set([
+  'as', 'and', 'assert', 'await', 'break', 'breakpoint', 'class', 'class_name', 'const',
+  'continue', 'elif', 'else', 'enum', 'extends', 'for', 'func', 'if', 'in', 'is', 'match',
+  'namespace', 'not', 'or', 'pass', 'preload', 'return', 'self', 'signal', 'static', 'super',
+  'trait', 'var', 'void', 'while', 'when', 'yield', 'true', 'false', 'null', '_',
+  'INF', 'NAN', 'PI', 'TAU', 'bindings', 'evaluate',
+]);
+
+function expression(value, name) {
+  if (typeof value !== 'string' || !value.trim()) {
+    throw new TypeError(`${name} must be a nonempty GDScript expression`);
+  }
+
+  return value;
+}
+
+function record(value) {
+  return value !== null && typeof value === 'object'
+    && Object.prototype.toString.call(value) === '[object Object]';
+}
+
+export function gdPredicate(predicate, bindings = {}) {
+  const observed = typeof predicate !== 'string';
+  if (observed && (
+    !record(predicate) || Object.keys(predicate).some((key) => !['value', 'matched'].includes(key))
+  )) {
+    throw new TypeError('Expected a predicate string or {value, matched}');
+  }
+
+  const matched = expression(observed ? predicate.matched : predicate, 'matched');
+  const value = observed ? expression(predicate.value, 'value') : null;
+  if (!record(bindings)) {
+    throw new TypeError('Bindings must be an object of named values');
+  }
+
+  if (Object.getOwnPropertySymbols(bindings).length) {
+    throw new TypeError('GDScript binding names must be strings');
+  }
+
+  const aliases = Object.keys(bindings).map((name) => {
+    if (!identifier.test(name) || reserved.has(name) || (observed && name === 'value')) {
+      throw new TypeError(`Invalid or reserved GDScript binding name: ${name}`);
+    }
+
+    return `\tvar ${name}: Variant = bindings[${JSON.stringify(name)}]`;
+  });
+
+  const body = [
+    ...aliases,
+    ...(aliases.length ? [''] : []),
+    ...(observed ? [`\tvar value: Variant = ${value}`] : []),
+    `\treturn {"matched": ${matched}, "value": ${observed ? 'value' : 'null'}}`,
+  ];
+
+  return {
+    source: ['extends RefCounted', '', 'func evaluate(bindings: Dictionary) -> Dictionary:',
+      ...body, ''].join('\n'),
+    bindings,
+  };
+}

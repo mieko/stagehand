@@ -11,22 +11,24 @@ enum Kind {
 const ObjectAccess = preload("object_access.gd")
 const Buffer = preload("property_recording_buffer.gd")
 const Failure = preload("failure.gd")
+const ScriptEndpoint = preload("script.gd")
+
 const SCHEMA_SIGNALS := [&"property_list_changed", &"script_changed"]
 
 var target: WeakRef
 var metadata: Dictionary = { }
 var _bridge: Node
-var _access: RefCounted
+var _access: ObjectAccess
 var _kind: Kind
 var _name: StringName
 var _path: NodePath
 var _args: Array = []
 var _dirty := false
-var _scripts: RefCounted
-var _evaluation: RefCounted
+var _scripts: ScriptEndpoint
+var _evaluation: ScriptEndpoint.Evaluation
 
 
-func _init(bridge: Node, scripts: RefCounted = null) -> void:
+func _init(bridge: Node, scripts: ScriptEndpoint = null) -> void:
 	_bridge = bridge
 	_access = ObjectAccess.new(bridge)
 	_scripts = scripts

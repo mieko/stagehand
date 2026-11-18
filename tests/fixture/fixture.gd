@@ -18,7 +18,7 @@ class Probe extends Node:
 
 	var count := 0
 	var handle := ""
-	var bridge: Node
+	var bridge: Bridge
 
 
 	func increment(params: Dictionary) -> int:
@@ -108,6 +108,23 @@ class Probe extends Node:
 			"height": image.get_height(),
 			"center": image.get_pixel(image.get_width() / 2, image.get_height() / 2),
 		}
+
+
+	func noisy_viewport(_params: Dictionary) -> SubViewport:
+		var viewport := SubViewport.new()
+		viewport.size = Vector2i(2048, 2048)
+		viewport.disable_3d = true
+		viewport.render_target_update_mode = SubViewport.UPDATE_ALWAYS
+
+		var pixels := Crypto.new().generate_random_bytes(2048 * 2048 * 3)
+		var image := Image.create_from_data(2048, 2048, false, Image.FORMAT_RGB8, pixels)
+		var sprite := Sprite2D.new()
+		sprite.centered = false
+		sprite.texture = ImageTexture.create_from_image(image)
+		viewport.add_child(sprite)
+		add_child(viewport)
+
+		return viewport
 
 
 	func retire(_params: Dictionary) -> bool:
@@ -265,6 +282,7 @@ func _ready() -> void:
 				"unsupported": probe.unsupported,
 				"large_output": probe.large_output,
 				"image_info": probe.image_info,
+				"noisy_viewport": probe.noisy_viewport,
 				"retire": probe.retire,
 			},
 			probe.observe,
@@ -295,7 +313,7 @@ func _ready() -> void:
 	print("STAGEHAND_READY ", bridge.get_port())
 
 
-func press_after_close(_peer: WebSocketPeer) -> void:
+func press_after_close(_peer: Bridge.WebSocket) -> void:
 	var result: Variant = $Stagehand/InputEndpoint.press({ "action": "move_forward" })
 	reentry_result["closed_press"] = result.code if result is Bridge.Failure else 0
 

@@ -2,6 +2,8 @@ extends Node3D
 
 signal measured
 
+const Recorder = preload("res://addons/stagehand/property_recorder.gd")
+
 var physics_tick := 0
 var idle_tick := 0
 var idle_position := Vector3.ZERO
@@ -12,7 +14,7 @@ var counted: int:
 		sample_reads += 1
 		return counter
 
-var lifecycle_recorder: Node
+var lifecycle_recorder: Recorder
 var lifecycle_action: StringName = &""
 var stopped_count := -1
 var lifecycle_value: int:
@@ -29,6 +31,7 @@ var remove_dynamic_on_read := false
 var property_list_reads := 0
 var payload: Variant = { "nested": [Vector3.ONE, { "number": 1 }] }
 var packed := PackedVector3Array([Vector3.ONE])
+# Keep the deferred test suite alive across its awaited checks.
 var _native_tests: RefCounted
 
 

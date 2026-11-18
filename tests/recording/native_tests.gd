@@ -3,27 +3,24 @@ extends RefCounted
 const Bridge = preload("res://addons/stagehand/bridge.gd")
 const Recorder = preload("res://addons/stagehand/property_recorder.gd")
 const Failure = preload("res://addons/stagehand/failure.gd")
+const Codec = preload("res://addons/stagehand/values.gd")
+const Fixture = preload("res://fixture.gd")
 
 var failures := 0
-var _fixture: Variant
-var _recorder: Node
+var _fixture: Fixture
+var _recorder: Recorder
 
 
-class CodecProbe extends RefCounted:
-	var delegate: RefCounted
+class CodecProbe extends Codec:
 	var calls := 0
 
 
-	func encode(value: Variant) -> Variant:
+	func encode(value: Variant, depth: int = 0) -> Variant:
 		calls += 1
-		return delegate.encode(value)
+		return super.encode(value, depth)
 
 
-	func decode(value: Variant) -> Variant:
-		return delegate.decode(value)
-
-
-func run(fixture: Node3D) -> void:
+func run(fixture: Fixture) -> void:
 	_fixture = fixture
 
 	var bridge := Bridge.new()
@@ -238,9 +235,8 @@ func _test_fixed_snapshots() -> void:
 func _test_fixed_storage() -> void:
 	_start(["position", "idle_position", "counter", "physics_tick"], { "max_samples": 2000 })
 
-	var codec: RefCounted = _recorder.get("_codec")
-	var probe := CodecProbe.new()
-	probe.delegate = codec
+	var codec: Codec = _recorder.get("_codec")
+	var probe := CodecProbe.new(codec.bridge)
 	_recorder.set("_codec", probe)
 	_fixture.emit_samples(2)
 
@@ -382,7 +378,7 @@ func _test_value_changes_and_budget() -> void:
 		"A property may change native value type without rewriting earlier rows",
 	)
 
-	var codec: RefCounted = _recorder.get("_codec")
+	var codec: Codec = _recorder.get("_codec")
 	var wire_bytes := JSON.stringify(codec.encode(page.samples)).to_utf8_buffer().size()
 	_check(
 		wire_bytes <= page.status.bytes,

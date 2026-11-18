@@ -1,9 +1,18 @@
 # Stagehand protocol 1
 
 One UTF-8 JSON-RPC 2.0 text message per WebSocket message. The listener is explicit,
-loopback by default, and authenticated. See [connection setup](../addons/stagehand/README.md)
+loopback by default, with game-configured authentication. See [connection setup](../addons/stagehand/README.md)
 for binding and transport options. Authentication and wire semantics are identical
 for local and remote clients.
+
+Given the game's HTTP or HTTPS base address, use `ws` or `wss` on the same host
+and port to open `/rpc`. On that base address, HTTP `/` returns Markdown discovery
+with links to the supplied assets. The fixed paths are `/client.mjs` for the
+client, `/api.md` for Stagehand, and `/game.md` for the game-specific reference. The
+listener rejects browser WebSocket origins before upgrade. WebSocket version 13
+supports standard frame lengths and fragmentation. The assembled text message
+is limited to 8 MiB. Binary messages and extensions such as compression are
+outside Stagehand's text-only protocol.
 
 ```json
 {
@@ -21,13 +30,15 @@ has `id`, `label`, `kind`, `operations`, `operation_info`, and `events`. An opti
 roots omit it. It is independent of the Stagehand protocol version and involves
 no negotiation. Labels are discovery hints; requests target a specific opaque `id`.
 Authentication and wire-protocol version mismatches fail before inspection.
-Authenticate within five seconds of connection.
+Complete the handshake within five seconds of connection. A server started with
+an empty token disables authentication and accepts an omitted token; protocol
+validation and all other session rules still apply.
 
 ## Wire methods
 
 | Method               | Named parameters                         | Result                       |
 | -------------------- | ---------------------------------------- | ---------------------------- |
-| `session.hello`      | `token`, optional `protocol:1`           | Session snapshot             |
+| `session.hello`      | optional `token`, optional `protocol:1`  | Session snapshot             |
 | `objects.list`       | none                                     | Fresh registered descriptors |
 | `object.describe`    | `object` handle                          | Descriptor                   |
 | `object.observe`     | `object` handle                          | `{object,value,clock}`       |
@@ -85,7 +96,7 @@ advertises `hold_until` as described under [conditional input](#conditional-inpu
 | `Runtime`          | `info()` — engine name/version, save directory, display server, scene, pause/time-scale/tick-rate state. Its observer returns the same information.                                                                                                                                                              |
 | `SceneTree`        | `current()` — root/current scene refs. `query({root?,name?:glob,class?:nativeClass,internal?:false,offset?:0,limit?:100})` — breadth-first live node records with node reference, name, path, class, groups and parent. Returns `{nodes, more}`; offsets count matching nodes, including the root if it matches. |
 | `Object`           | `inspect({target})` — property/method/signal metadata. `get({target,property})`, `set({target,property,value})`, `call({target,method,args?:[]})`.                                                                                                                                                               |
-| `Screen`           | `viewports()` — up to 100 live viewports. `dimensions({viewport?})` — logical/texture sizes. `capture({viewport?})` — PNG base64, capture ID, viewport, width/height, MIME, timing. Root window is default.                                                                                                      |
+| `Screen`           | `viewports()` — up to 100 live viewports. `dimensions({viewport?})` — logical/texture sizes. `capture({viewport?})` and `capture_chunk({capture,offset})` — see [screenshots](#observations-images-and-limits).                         |
 | `Script`           | `evaluate({source,bindings?:{}})` — compile a RefCounted evaluator and return its synchronous native result.                                                                                                                                                                                                     |
 | `Input`            | `actions()`, `press(input)`, `release(input)`, `move_mouse({relative?,position?})`, `move_mouse_to({position,duration_ms,from?})`, `scroll({vertical?,horizontal?,position?})`, `sequence({ticks,events,max_wall_ms?})`, `status({action})`, `cancel({action})`.                                                 |
 | `PropertyRecorder` | Captures and one-shot readings inside Godot. See [recording](recording.md) for operations, selectors and lifecycle.                                                                                                                                                                                              |
@@ -306,11 +317,19 @@ Screen capture returns the last available viewport image through ordinary render
 APIs. Render/physics counters are sampled at readback; the image is not guaranteed
 to be an atomic snapshot of another observation or the current physics tick.
 Dimensions are viewport/texture pixels, not physical monitor dimensions. Headless
-no-render capture returns unavailable. PNGs are correlated inline responses; the JS
-capture helper returns a Buffer.
+no-render capture returns unavailable. The root window is the default viewport.
+
+Small captures return a PNG in `base64` alongside metadata. A PNG over 5 MiB
+returns the same metadata with `byte_length` in place of `base64`. Call
+`capture_chunk({capture, offset})` starting at offset 0, decode each chunk's
+`base64` separately, and continue at its `next_offset` until `byte_length`.
+Stagehand keeps the latest large capture per connection until its final chunk
+is read or the connection closes. A PNG over 32 MiB returns a resource-limit
+error. The JS `screen.capture()` helper returns the complete PNG as a Buffer in
+both cases.
 
 Limits: 8 connections, 5s authentication deadline, 8MiB inbound/outbound messages,
-64 requests per batch, 64 packets processed per peer/frame, 128 subscriptions per
+64 requests per batch, 64 WebSocket frames parsed per peer per engine frame, 128 subscriptions per
 connection, value depth 16, collections/native argument arrays of 1024 entries.
 Tree queries stop at 10000 visited nodes and return at most 1000 matches. The
 viewport list stops at 100 entries. These bounds do not make arbitrary reflected

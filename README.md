@@ -10,6 +10,9 @@ The addon is pure GDScript. A client can inspect a running game much like
 browser DevTools can inspect a page. Stagehand speaks its own
 [JSON-RPC protocol](docs/protocol.md).
 
+A running game has one HTTP or HTTPS Stagehand address. Open it to find the
+client and separate Stagehand and game API references when available.
+
 ## Add it to a Godot project
 
 Clone the repository and copy the addon into your project:
@@ -47,7 +50,7 @@ func _ready() -> void:
 		push_error(error_string(error))
 		return
 
-	print("Stagehand port: ", bridge.get_port())
+	print("Stagehand address: http://127.0.0.1:", bridge.get_port())
 ```
 
 Launch the game from a shell with a private token in its environment. For
@@ -64,22 +67,34 @@ See the [addon guide](addons/stagehand/README.md) for setup and remote connectio
 
 ## Connect from JavaScript
 
-From the Stagehand checkout, launch `node` (22 or newer) with the same token in
-its environment. Substitute the port printed by the game:
+Use the address printed by the game. Import the client directly if you already
+have it in your project. From the Stagehand checkout, the import path is
+`./client/client.mjs`.
+
+If you're starting with just the game's address and it serves a client, download
+the module with curl.
+
+```sh
+curl -fsSL http://127.0.0.1:49152/client.mjs -o stagehand-client.mjs
+```
+
+The example below imports the downloaded file. Launch Node.js 22 or newer from
+that directory with the game's token in its environment.
 
 ```js
-const { connect } = await import('./client/client.mjs');
-const game = await connect('ws://127.0.0.1:49152', {
+const { connect } = await import('./stagehand-client.mjs');
+const game = await connect('http://127.0.0.1:49152', {
   token: process.env.STAGEHAND_TOKEN,
 });
 const tree = await game.builtin('SceneTree');
 console.log((await tree.query({ class: 'Camera3D' })).nodes.map((node) => node.path));
 ```
 
-Reuse the connection for later calls, then call `game.close()`. The small JS client
-has no npm dependencies. To write a client in another language, use its WebSocket
-and JSON libraries. The [wire reference](docs/protocol.md) describes the handshake,
-requests, events and encoding of Godot values.
+Reuse the connection for later calls, then call `game.close()`. The small JS
+client runs from a single file using Node's built-ins. The
+[wire reference](docs/protocol.md) covers writing a client in another language
+with WebSocket and JSON libraries. See how to
+[package and serve your game's client and API reference](addons/stagehand/README.md#serve-the-matching-client-and-api-reference).
 
 ## Choose what to expose
 

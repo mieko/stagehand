@@ -1,5 +1,5 @@
 // Run in a persistent JS session or as an ordinary external bot:
-// STAGEHAND_URL=ws://127.0.0.1:PORT STAGEHAND_TOKEN=... node examples.mjs
+// STAGEHAND_URL=http://127.0.0.1:PORT STAGEHAND_TOKEN=... node examples.mjs
 // Abbreviated outputs below show the standalone fixture; other games differ.
 import { connect, GodotValue } from './client.mjs';
 

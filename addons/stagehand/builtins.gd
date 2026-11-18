@@ -5,13 +5,19 @@ const ObjectAccess = preload("object_access.gd")
 const PropertyRecorder = preload("property_recorder.gd")
 const InputEndpoint = preload("input.gd")
 const ScriptEndpoint = preload("script.gd")
+const WebSocket = preload("websocket.gd")
+
 const NAMES := ["Runtime", "SceneTree", "Object", "Screen", "Input", "Script", "PropertyRecorder"]
+const INLINE_CAPTURE_BYTES := 5 * 1024 * 1024
+const CAPTURE_CHUNK_BYTES := 2 * 1024 * 1024
+const MAX_CAPTURE_BYTES := 32 * 1024 * 1024
 
 var bridge: Node
 var native_signals_enabled := false
 var _next_capture := 0
-var _scripts: RefCounted
-var _access: RefCounted
+var _captures: Dictionary = { }
+var _scripts: ScriptEndpoint
+var _access: ObjectAccess
 
 
 func _init(owner: Node) -> void:
@@ -66,16 +72,22 @@ func install(names: PackedStringArray) -> void:
 		)
 
 	if "Screen" in names:
+		bridge.connection_closed.connect(_forget_capture)
 		bridge.register_object(
 			self,
 			"Screen",
 			"Screen",
-			{ "viewports": viewports, "dimensions": dimensions, "capture": capture },
+			{
+				"viewports": viewports,
+				"dimensions": dimensions,
+				"capture": capture,
+				"capture_chunk": capture_chunk,
+			},
 			Callable(),
 			[],
 			{ },
 			true,
-			"1.0.0",
+			"1.1.0",
 		)
 
 	if "Script" in names:
@@ -246,18 +258,64 @@ func capture(params: Dictionary) -> Variant:
 	if image == null or image.is_empty():
 		return bridge.fail(Failure.IMAGE_UNAVAILABLE, "Viewport has no rendered image")
 
+	var png := image.save_png_to_buffer()
+	if png.is_empty():
+		return bridge.fail(Failure.IMAGE_UNAVAILABLE, "Could not encode viewport")
+
+	if png.size() > MAX_CAPTURE_BYTES:
+		return bridge.fail(
+			Failure.RESOURCE_LIMIT,
+			"Encoded screenshot exceeds the 32 MiB capture limit",
+		)
+
 	_next_capture += 1
 	var clock: Dictionary = bridge.clock()
-
-	return {
+	var result := {
 		"viewport": viewport,
 		"width": image.get_width(),
 		"height": image.get_height(),
 		"capture": "%s:capture:%d" % [clock.instance, _next_capture],
 		"clock": clock,
 		"mime": "image/png",
-		"base64": Marshalls.raw_to_base64(image.save_png_to_buffer()),
 		"render_frame": Engine.get_frames_drawn(),
 		"physics_tick": Engine.get_physics_frames(),
 		"phase": "last_rendered_image",
 	}
+
+	if png.size() <= INLINE_CAPTURE_BYTES:
+		result["base64"] = Marshalls.raw_to_base64(png)
+	else:
+		var peer: WebSocket = bridge.request_peer()
+		if peer == null:
+			return bridge.fail(Failure.INTERNAL_ERROR, "Screenshot requires a connection")
+
+		_captures[peer] = { "id": result.capture, "png": png }
+		result["byte_length"] = png.size()
+
+	return result
+
+
+func capture_chunk(params: Dictionary) -> Variant:
+	var peer: WebSocket = bridge.request_peer()
+	var capture: Dictionary = _captures.get(peer, { })
+	if capture.is_empty() or capture.id != params.get("capture"):
+		return bridge.fail(Failure.INVALID_PARAMS, "No matching screenshot on this connection")
+
+	var png: PackedByteArray = capture.png
+	var offset: Variant = params.get("offset")
+	if not (
+		(offset is int or offset is float) and offset >= 0
+		and offset < png.size() and offset == floor(offset)
+	):
+		return bridge.fail(Failure.INVALID_PARAMS, "Invalid screenshot offset")
+
+	var end := mini(int(offset) + CAPTURE_CHUNK_BYTES, png.size())
+	var chunk := Marshalls.raw_to_base64(png.slice(int(offset), end))
+	if end == png.size():
+		_forget_capture(peer)
+
+	return { "base64": chunk, "next_offset": end }
+
+
+func _forget_capture(peer: WebSocket) -> void:
+	_captures.erase(peer)
