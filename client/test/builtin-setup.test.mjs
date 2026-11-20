@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { connect } from '../client.mjs';
+import { connect } from '../../addons/stagehand/client.mjs';
 import { launchFixture } from './fixture.mjs';
 
 // Godot Error values; setup is a local game API, not a JSON-RPC error.
@@ -32,7 +32,7 @@ test('invalid builtin setup installs nothing and can be corrected and retried', 
     assert.equal(corrected, OK);
     assert.equal(configured.configured, true);
     assert.deepEqual(configured.selected, ['Input', 'Script']);
-    assert.ok((await (await game.builtin('Input')).describe()).operations.includes('hold_until'));
+    assert.ok((await (await game.root('Input')).describe()).operations.includes('hold_until'));
 
     const repeated = await setup.invoke('configure_builtins', { names: ['Object'] });
 

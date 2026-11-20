@@ -1,7 +1,7 @@
 import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
 import { once } from 'node:events';
-import { connect, gdPredicate } from '../client.mjs';
+import { connect, gdPredicate } from '../../addons/stagehand/client.mjs';
 import { launchFixture } from './fixture.mjs';
 
 let fixture, game, input, script, scene, capsule, nativeTree;
@@ -25,9 +25,9 @@ before(async () => {
   fixture = await launchFixture({builtins: ['Input', 'Script', 'SceneTree', 'Object']});
   game = await connect(fixture.url, {token: fixture.token});
 
-  input = await game.builtin('Input');
-  script = await game.builtin('Script');
-  const tree = await game.builtin('SceneTree');
+  input = await game.root('Input');
+  script = await game.root('Script');
+  const tree = await game.root('SceneTree');
   ({scene} = await tree.invoke('current'));
   nativeTree = await scene.call('get_tree');
   capsule = (await tree.invoke('query', {root: scene, name: 'Capsule'})).nodes[0].node;
@@ -139,8 +139,8 @@ for (const [encoding, expression] of [
     const driver = await connect(isolated.url, {token: isolated.token});
     const observer = await connect(isolated.url, {token: isolated.token});
 
-    const control = await driver.builtin('Input');
-    const watched = await observer.builtin('Input');
+    const control = await driver.root('Input');
+    const watched = await observer.root('Input');
     let observed;
     const stop = await watched.subscribe('completed', ({value}) => { observed = value; });
 
@@ -462,7 +462,7 @@ test('a non-immediate reversal releases W and starts S at the trigger boundary',
 
 test('disconnect cancels conditional work and releases the departing writer holds', async () => {
   const driver = await connect(fixture.url, {token: fixture.token});
-  const control = await driver.builtin('Input');
+  const control = await driver.root('Input');
   const action = await control.startHoldUntil({
     ...gdPredicate('false'), hold: [forward], max_simulation_seconds: 3,
   });
@@ -492,7 +492,7 @@ test('a callback that stops its bridge cannot drive its retired action response'
   const driver = await connect(isolated.url, {token: isolated.token});
 
   try {
-    const evaluator = await driver.builtin('Script');
+    const evaluator = await driver.root('Script');
     const target = await evaluator.invoke('evaluate', {
       source: `extends RefCounted
 
@@ -500,7 +500,7 @@ func evaluate(_bindings: Dictionary) -> Variant:
     return Engine.get_main_loop().current_scene
 `,
     });
-    const control = await driver.builtin('Input');
+    const control = await driver.root('Input');
     const source = `extends RefCounted
 
 var visits := 0
@@ -544,7 +544,7 @@ test('constructor-side shutdown cannot admit work for the departed peer', async 
   const observer = await connect(isolated.url, {token: isolated.token});
 
   try {
-    const control = await driver.builtin('Input');
+    const control = await driver.root('Input');
 
     await assert.rejects(control.startHoldUntil({
       source: shutdownEvaluator, hold: [forward], max_simulation_seconds: 1,

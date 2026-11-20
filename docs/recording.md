@@ -10,8 +10,8 @@ See [security](security.md) before exposing it to clients.
 Choose actual objects using SceneTree or your game's registered operations:
 
 ```js
-const recorder = await game.builtin('PropertyRecorder');
-const tree = await game.builtin('SceneTree');
+const recorder = await game.root('PropertyRecorder');
+const tree = await game.root('SceneTree');
 const body = (await tree.query({class: 'CharacterBody3D'})).nodes[0].node;
 
 await recorder.start({
@@ -71,7 +71,7 @@ shared AnimationNode resource. Dynamic owners must call
 `notify_property_list_changed()` when their properties change. Property/script
 changes invalidate native bindings; lost targets stop capture visibly.
 
-Script readings use the same [GDScript evaluator](protocol.md#runtime-gdscript):
+Script readings use the same [GDScript evaluator](../addons/stagehand/api.md#runtime-gdscript):
 
 ```js
 const source = `extends RefCounted

@@ -1,6 +1,6 @@
 import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { connect, gdPredicate } from '../client.mjs';
+import { connect, gdPredicate } from '../../addons/stagehand/client.mjs';
 import { launchFixture } from './fixture.mjs';
 
 let fixture, game, script;
@@ -11,7 +11,7 @@ before(async () => {
     expectedErrors: [/Parse Error:/, /Trying to call an async function without/],
   });
   game = await connect(fixture.url, {token: fixture.token});
-  script = await game.builtin('Script');
+  script = await game.root('Script');
 
   if (process.env.STAGEHAND_REQUIRE_NON_DOTNET === '1') {
     const source = `extends RefCounted
@@ -61,7 +61,7 @@ func _init() -> void:
 });
 
 test('both predicate helper forms use the common evaluator with live native bindings', async () => {
-  const tree = await game.builtin('SceneTree');
+  const tree = await game.root('SceneTree');
   const {scene} = await tree.invoke('current');
   const predicate = gdPredicate('fixture.heartbeat >= 0', {fixture: scene});
 
@@ -106,7 +106,7 @@ func evaluate(bindings):
 });
 
 test('an accidental coroutine does not become a remote function-state result', async () => {
-  const tree = await game.builtin('SceneTree');
+  const tree = await game.root('SceneTree');
   const {scene} = await tree.invoke('current');
   const source = `extends RefCounted
 
@@ -138,7 +138,7 @@ test('generated evaluators work with strict consumer declaration warnings', asyn
   const connection = await connect(strict.url, {token: strict.token});
 
   try {
-    const endpoint = await connection.builtin('Script');
+    const endpoint = await connection.root('Script');
     const predicate = gdPredicate({value: 'höhe', matched: 'value > 1'}, {höhe: 2});
     const result = await endpoint.invoke('evaluate', predicate);
 
@@ -156,7 +156,7 @@ test('Input can be selected independently without enabling Script', async () => 
   try {
     assert.equal(await connection.findObject('Script'), null);
 
-    const input = await connection.builtin('Input');
+    const input = await connection.root('Input');
 
     assert.ok(!(await input.describe()).operations.includes('hold_until'));
   } finally {

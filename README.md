@@ -8,7 +8,7 @@ start a level by name.
 
 The addon is pure GDScript. A client can inspect a running game much like
 browser DevTools can inspect a page. Stagehand speaks its own
-[JSON-RPC protocol](docs/protocol.md).
+[JSON-RPC protocol](addons/stagehand/api.md).
 
 A running game has one HTTP or HTTPS Stagehand address. Open it to find the
 client and separate Stagehand and game API references when available.
@@ -69,7 +69,7 @@ See the [addon guide](addons/stagehand/README.md) for setup and remote connectio
 
 Use the address printed by the game. Import the client directly if you already
 have it in your project. From the Stagehand checkout, the import path is
-`./client/client.mjs`.
+`./addons/stagehand/client.mjs`.
 
 If you're starting with just the game's address and it serves a client, download
 the module with curl.
@@ -86,13 +86,13 @@ const { connect } = await import('./stagehand-client.mjs');
 const game = await connect('http://127.0.0.1:49152', {
   token: process.env.STAGEHAND_TOKEN,
 });
-const tree = await game.builtin('SceneTree');
+const tree = await game.root('SceneTree');
 console.log((await tree.query({ class: 'Camera3D' })).nodes.map((node) => node.path));
 ```
 
 Reuse the connection for later calls, then call `game.close()`. The small JS
 client runs from a single file using Node's built-ins. The
-[wire reference](docs/protocol.md) covers writing a client in another language
+[wire reference](addons/stagehand/api.md) covers writing a client in another language
 with WebSocket and JSON libraries. See how to
 [package and serve your game's client and API reference](addons/stagehand/README.md#serve-the-matching-client-and-api-reference).
 
@@ -114,7 +114,7 @@ Omitting the call leaves only the Registry and the objects you register.
 | `PropertyRecorder` | Sample properties and getters inside Godot, then retrieve the recording.                |
 
 For examples of input and sampling inside the game, see [conditional
-input](docs/protocol.md#conditional-input) and [recording](docs/recording.md).
+input](addons/stagehand/api.md#conditional-input) and [recording](docs/recording.md).
 
 ## Expose a game operation
 

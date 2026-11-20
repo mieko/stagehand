@@ -1,6 +1,6 @@
 # JavaScript client
 
-Import `client/client.mjs` from the Stagehand checkout or use your game's local
+Import `addons/stagehand/client.mjs` from the Stagehand checkout or use your game's local
 client package. If all you have is a game address, you can download
 `/client.mjs` when the game serves it. The client runs as one module in Node
 22 or newer. The core module exports `connect`,
@@ -8,7 +8,7 @@ client package. If all you have is a game address, you can download
 global WebSocket can pass a constructor in `connect(address, {token, WebSocket})`.
 Keep a client connected to reuse handles and subscriptions; call `close()` when done.
 
-See the [wire protocol](../docs/protocol.md) for message and value formats when
+See the [wire protocol](../addons/stagehand/api.md) for message and value formats when
 writing clients in other languages.
 
 `await game.findObject(label)` looks up the current registered objects and returns
@@ -18,7 +18,7 @@ descriptors and `game.object(id)` when you already have a specific handle.
 Every bridge exposes a `Registry` root, including when optional builtins are off:
 
 ```js
-const registry = await game.builtin('Registry');
+const registry = await game.root('Registry');
 const roots = await registry.list();
 
 console.log(roots.map(({ label, kind, version }) => ({ label, kind, version })));
@@ -28,7 +28,7 @@ The list includes Registry itself and reflects current registrations/removals.
 `game.objects()` returns the same descriptors, including any declared API version.
 `game.session` is the initial handshake snapshot, not a live cache.
 
-`await game.builtin(label)` uses the same first-match lookup, caches the handle
+`await game.root(label)` uses the same first-match lookup, caches the handle
 until the object is removed or the connection closes, and throws if it is absent.
 It's a convenience for required named endpoints, including ordinary game-owned
 registrations. Builtins use their names as both label and kind; for example,
@@ -43,7 +43,7 @@ See the [addon usage guide](../addons/stagehand/README.md) for game-side setup a
 
 ## Builtin methods
 
-Builtin wrappers expose [their operations](../docs/protocol.md#optional-builtin-operations)
+Builtin wrappers expose [their operations](../addons/stagehand/api.md#optional-builtin-operations)
 as named methods with the same parameters, for example `runtime.info()` or
 `script.evaluate({source, bindings})`. See [recording](../docs/recording.md) for a
 complete capture/retrieval example.
@@ -92,9 +92,9 @@ Select Script and Input in the game first. The helper generates complete GDScrip
 the game compiles and runs it. This example assumes a live `capsule` reference:
 
 ```js
-import { gdPredicate } from './client.mjs';
+import { gdPredicate } from '../addons/stagehand/client.mjs';
 
-const input = await game.builtin('Input');
+const input = await game.root('Input');
 const accepted = await input.startHoldUntil({
   ...gdPredicate(
     {
@@ -124,7 +124,7 @@ object-form `value`) are rejected. The engine remains the source compiler and
 checks game-specific symbols. Use raw `{source,bindings}` for more involved
 evaluators or other binding keys.
 
-See [the wire contract](../docs/protocol.md#conditional-input) for response sequences,
+See [the wire contract](../addons/stagehand/api.md#conditional-input) for response sequences,
 budgets, snapshots, cleanup and synchronous execution limits.
 
 ## Subscribing to native signals
@@ -182,7 +182,7 @@ wrappers, keep a separate cache per connection keyed by object identity.
 For methods that simply forward named parameters, use `forwardMethods`:
 
 ```js
-import { connect, forwardMethods } from './client.mjs';
+import { connect, forwardMethods } from '../addons/stagehand/client.mjs';
 
 const game = await connect(address, {
   token,
@@ -191,7 +191,7 @@ const game = await connect(address, {
   },
 });
 
-const greeter = await game.builtin('Greeter');
+const greeter = await game.root('Greeter');
 console.log(await greeter.hello());
 console.log(await greeter.remote.describe());
 ```
@@ -227,7 +227,7 @@ const game = await connect(address, {
   },
 });
 
-const input = await game.builtin('Input');
+const input = await game.root('Input');
 await input.tap({ key: 'W', physical: true });
 console.log(await input.actions());
 ```

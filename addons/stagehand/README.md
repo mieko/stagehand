@@ -50,7 +50,7 @@ Pass a subset such as `["Runtime", "Screen", "Input"]` to expose only those
 endpoints. Call this method once with the desired set. Passing `[]`, or omitting
 the call, leaves optional builtins disabled; Registry and your game-owned
 registrations remain available. The
-[protocol reference](../../docs/protocol.md#optional-builtin-operations) lists
+[protocol reference](api.md#optional-builtin-operations) lists
 each builtin's operations.
 
 `enable_builtins()` returns `OK`, `ERR_INVALID_PARAMETER` for unknown names, or
@@ -70,7 +70,7 @@ with `configured: true` and an empty selection. This reports the startup selecti
 Registry lists the currently exposed objects.
 
 Selecting both Input and Script adds `hold_until` to Input. See
-[conditional input](../../docs/protocol.md#conditional-input) for its GDScript
+[conditional input](api.md#conditional-input) for its GDScript
 condition and bounded execution rules.
 
 Every client with the token can use the selected endpoints. Enable Object, Script
@@ -80,43 +80,35 @@ See [security](../../docs/security.md) for what each builtin lets a client do.
 
 ## Serve the matching client and API reference
 
-Put a self-contained Node.js 22+ module at `stagehand/client.mjs` in your Godot
-project. For the core API, copy `client/client.mjs` from the Stagehand revision
-you ship. Put the Stagehand reference at `stagehand/api.md`. If your game has
-its own API or workflows, put its quick start and reference in `stagehand/game.md`.
-
-Include `stagehand/client.mjs,stagehand/api.md,stagehand/game.md` in the export
-preset's non-resource file filter. Omit the third path if you have no game
-reference. Pass the paths to the bridge before starting the listener.
+The addon ships its standalone Node.js 22+ client and Stagehand API reference.
+Call `serve_client()` before starting the listener to publish them. Supply a
+game reference if you have one:
 
 ```gdscript
 bridge.app_name = "My Game"
-var error := bridge.serve_client(
-	"res://stagehand/client.mjs",
-	"res://stagehand/api.md",
-	"res://stagehand/game.md",
-)
-if error == OK:
-	error = bridge.start(token, 0)
+var error := bridge.serve_client("res://docs/game.md")
 ```
 
-The Markdown index at `/` links to the client at `/client.mjs`, the Stagehand
-reference at `/api.md`, and the optional game reference at `/game.md`. These
-downloads are public to clients that can reach the listener. The game reference
-can link to the Stagehand reference as `./api.md`. Pass the same base address
-to `connect()` for RPC at `/rpc`.
+Check the return value before advertising the downloads. RPC can start without
+publishing assets. In an export preset, include
+`addons/stagehand/client.mjs,addons/stagehand/api.md` in the non-resource file
+filter and add the path to your game reference if supplied.
 
-Set `app_name` before `start()` to display your app's name on the discovery
-page. An empty name uses “this game.”
+The index at `/` links to the published `/client.mjs`, `/api.md`, and optional
+`/game.md`. These downloads are public to clients that can reach the listener.
+Pass the same HTTP base address to `connect()` for RPC at `/rpc`. Set
+`app_name` before `start()` to name the game on the index.
 
 ### Bundle a game-specific client
 
-With a pinned Stagehand checkout beside your game project, save this entry
-point as `game-client.mjs` in the project root. It adds a method for the
-[Greeter example](../../README.md#expose-a-game-operation).
+The core client can call any registered operation. To add named methods for
+your game, save an entry point such as `game-client.mjs` in your project root.
+This example adds a method for the [Greeter example](../../README.md#expose-a-game-operation)
+and keeps the core module's named exports.
 
 ```js
-import { connect as connectStagehand, forwardMethods } from '../stagehand/client/client.mjs';
+import { connect as connectStagehand, forwardMethods } from './addons/stagehand/client.mjs';
+export * from './addons/stagehand/client.mjs';
 
 export function connect(address, options = {}) {
   return connectStagehand(address, {
@@ -129,17 +121,19 @@ export function connect(address, options = {}) {
 }
 ```
 
-Run the bundle command from the Godot project root with esbuild available as a
-development tool.
+With esbuild available as a development tool, run this from the Godot project root:
 
 ```sh
 npx esbuild game-client.mjs --bundle --platform=node --format=esm \
   --outfile=stagehand/client.mjs
 ```
 
-The bundle includes the modules your entry point imports. Node provides its
-own built-ins. Package the output with the game, and users can download and
-import that one file. [esbuild's Node guide](https://esbuild.github.io/getting-started/#bundling-for-node)
+Pass `"res://stagehand/client.mjs"` as the second argument to `serve_client()`
+and include that file in the export preset in place of the default client.
+If your mod mounts its assets under a different resource directory, pass the
+packaged core reference path as the third argument.
+The bundle includes the imported modules. Users download and import one file.
+[esbuild's Node guide](https://esbuild.github.io/getting-started/#bundling-for-node)
 
 ## Remote connections
 
@@ -166,12 +160,15 @@ const game = await connect("http://game-host:49152", {
 
 The addon serves plain HTTP and WebSocket, which do not encrypt the token or traffic. Use a
 trusted network or an encrypted tunnel; for TLS termination in front of the addon,
-the client can use the proxy's `https://` base address.
+the client can use the proxy's `https://` base address. Mount Stagehand at the root. Forward HTTP/1.1
+upgrades on `/rpc` and preserve any incoming `Origin` header. For a loopback
+backend, use its loopback host in the upstream `Host` header. An SSH local
+forward can use a different local port; connect to its loopback address.
 
-`start("", port, address)` explicitly disables token checks; the client can omit
-`token`. The listener rejects browser-origin WebSocket connections in either
-mode. With an empty token, native clients that can reach the port can use the
-registered operations. See [security](../../docs/security.md).
+`start()` requires a nonempty token. Use `start_local(port = 0)` to explicitly
+allow tokenless access on the available loopback interfaces. Any local process
+that can reach that listener can use the registered operations. Both modes
+reject WebSocket upgrades carrying an `Origin` header. See [security](../../docs/security.md).
 
 ## JavaScript
 
@@ -187,14 +184,14 @@ const game = await connect("http://127.0.0.1:49152", {
 });
 
 try {
-  const input = await game.builtin("Input");
+  const input = await game.root("Input");
   const movement = await input.sequence({
     ticks: 12,
     events: [{ at_tick: 0, pressed: true, input: { action: "move_forward" } }],
   });
   console.log(movement.reason); // => sequence_exhausted
 
-  const screen = await game.builtin("Screen");
+  const screen = await game.root("Screen");
   const capture = await screen.capture();
   await writeFile("/tmp/stagehand.png", capture.image);
 } finally {
@@ -260,5 +257,5 @@ Game logic and asynchronous actions belong to game-owned endpoints.
 Global Input can affect the human-controlled character; independent character
 controls belong in your game's operations.
 
-See [the protocol](../../docs/protocol.md) for methods, types, timing, limits, and input
+See [the protocol](api.md) for methods, types, timing, limits, and input
 semantics. See [development](../../docs/development.md) for tested scope and commands.

@@ -2,7 +2,7 @@
   "name": "godot-stagehand",
   "private": true,
   "type": "module",
-  "exports": "./client/client.mjs",
+  "exports": "./addons/stagehand/client.mjs",
   "engines": {
     "node": ">=22"
   },

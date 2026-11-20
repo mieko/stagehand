@@ -6,7 +6,7 @@ with the game's base address and call the `Fixture` root to echo a value.
 ```js
 const { connect } = await import('./client.mjs');
 const game = await connect(address, { token });
-const fixture = await game.builtin('Fixture');
+const fixture = await game.root('Fixture');
 console.log(await fixture.invoke('echo', { value: 'Hello!' }));
 game.close();
 ```

@@ -1,7 +1,34 @@
-# Stagehand protocol 1
+# Stagehand API
+
+## Connect from JavaScript
+
+Use the Stagehand HTTP or HTTPS address supplied by the game. If the discovery
+page links to a JavaScript client, download it to a local file:
+
+```sh
+curl -fsSL http://127.0.0.1:49152/client.mjs -o stagehand-client.mjs
+```
+
+In Node.js 22 or newer, substitute your game's address and supply its access
+token if required:
+
+```js
+const { connect } = await import('./stagehand-client.mjs');
+const game = await connect('http://127.0.0.1:49152', {
+  token: process.env.STAGEHAND_TOKEN,
+});
+console.log(await game.objects());
+game.close();
+```
+
+Use the same `connect()` call if you already have the client. For a registered
+root, `await game.root('Registry')` looks up and caches its handle. If the
+discovery page lists a game API, it describes the operations that game adds.
+
+## Wire protocol 1
 
 One UTF-8 JSON-RPC 2.0 text message per WebSocket message. The listener is explicit,
-loopback by default, with game-configured authentication. See [connection setup](../addons/stagehand/README.md)
+loopback by default, with game-configured authentication. See [connection setup](https://github.com/mieko/stagehand/blob/main/addons/stagehand/README.md)
 for binding and transport options. Authentication and wire semantics are identical
 for local and remote clients.
 
@@ -9,7 +36,7 @@ Given the game's HTTP or HTTPS base address, use `ws` or `wss` on the same host
 and port to open `/rpc`. On that base address, HTTP `/` returns Markdown discovery
 with links to the supplied assets. The fixed paths are `/client.mjs` for the
 client, `/api.md` for Stagehand, and `/game.md` for the game-specific reference. The
-listener rejects browser WebSocket origins before upgrade. WebSocket version 13
+listener rejects WebSocket upgrades carrying an `Origin` header. Native clients should omit it. WebSocket version 13
 supports standard frame lengths and fragmentation. The assembled text message
 is limited to 8 MiB. Binary messages and extensions such as compression are
 outside Stagehand's text-only protocol.
@@ -30,8 +57,8 @@ has `id`, `label`, `kind`, `operations`, `operation_info`, and `events`. An opti
 roots omit it. It is independent of the Stagehand protocol version and involves
 no negotiation. Labels are discovery hints; requests target a specific opaque `id`.
 Authentication and wire-protocol version mismatches fail before inspection.
-Complete the handshake within five seconds of connection. A server started with
-an empty token disables authentication and accepts an omitted token; protocol
+Complete the handshake within five seconds of connection. A server started in
+the explicit tokenless loopback mode accepts an omitted token; protocol
 validation and all other session rules still apply.
 
 ## Wire methods
@@ -86,8 +113,8 @@ Builtins are ordinary registered objects, with their names as both label and kin
 (`Input`, `Screen`, etc.), invoked through the same `object.call` method. A game
 may enable any subset or none.
 
-Registry lists the currently exposed roots. See the [addon guide](../addons/stagehand/README.md)
-for builtin selection and setup errors, and [security](security.md) for what each
+Registry lists the currently exposed roots. See the [addon guide](https://github.com/mieko/stagehand/blob/main/addons/stagehand/README.md)
+for builtin selection and setup errors, and [security](https://github.com/mieko/stagehand/blob/main/docs/security.md) for what each
 builtin lets a client do. When Script and Input are both selected, Input also
 advertises `hold_until` as described under [conditional input](#conditional-input).
 
@@ -99,7 +126,7 @@ advertises `hold_until` as described under [conditional input](#conditional-inpu
 | `Screen`           | `viewports()` — up to 100 live viewports. `dimensions({viewport?})` — logical/texture sizes. `capture({viewport?})` and `capture_chunk({capture,offset})` — see [screenshots](#observations-images-and-limits).                         |
 | `Script`           | `evaluate({source,bindings?:{}})` — compile a RefCounted evaluator and return its synchronous native result.                                                                                                                                                                                                     |
 | `Input`            | `actions()`, `press(input)`, `release(input)`, `move_mouse({relative?,position?})`, `move_mouse_to({position,duration_ms,from?})`, `scroll({vertical?,horizontal?,position?})`, `sequence({ticks,events,max_wall_ms?})`, `status({action})`, `cancel({action})`.                                                 |
-| `PropertyRecorder` | Captures and one-shot readings inside Godot. See [recording](recording.md) for operations, selectors and lifecycle.                                                                                                                                                                                              |
+| `PropertyRecorder` | Captures and one-shot readings inside Godot. See [recording](https://github.com/mieko/stagehand/blob/main/docs/recording.md) for operations, selectors and lifecycle.                                                                                                                                                                                              |
 
 Runtime `engine` metadata uses ordinary string keys and includes `name`, `major`,
 `minor` and `patch` alongside Godot's remaining version fields. `save_directory`
@@ -300,7 +327,7 @@ sample clock/time.
 
 The JS helpers are `input.startHoldUntil(params)` (accepted action plus finished
 promise/cancel/status) and `input.holdUntil(params)` (wait for completion).
-[`gdPredicate`](../client/README.md#gdscript-predicates) optionally generates source;
+[`gdPredicate`](https://github.com/mieko/stagehand/blob/main/client/README.md#gdscript-predicates) optionally generates source;
 raw source and the same wire operations are available to any language.
 
 ### Observations, images, and limits
@@ -326,7 +353,8 @@ returns the same metadata with `byte_length` in place of `base64`. Call
 Stagehand keeps the latest large capture per connection until its final chunk
 is read or the connection closes. A PNG over 32 MiB returns a resource-limit
 error. The JS `screen.capture()` helper returns the complete PNG as a Buffer in
-both cases.
+both cases and serializes captures on a connection. Wire callers should finish
+reading one large capture before requesting another.
 
 Limits: 8 connections, 5s authentication deadline, 8MiB inbound/outbound messages,
 64 requests per batch, 64 WebSocket frames parsed per peer per engine frame, 128 subscriptions per

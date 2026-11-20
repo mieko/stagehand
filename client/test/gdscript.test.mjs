@@ -1,7 +1,7 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
 import { runInNewContext } from 'node:vm';
-import { gdPredicate } from '../client.mjs';
+import { gdPredicate } from '../../addons/stagehand/client.mjs';
 
 test('predicate generation passes bindings unchanged and emits typed local aliases', () => {
   const bindings = {capsule: {opaque: 'object reference'}};

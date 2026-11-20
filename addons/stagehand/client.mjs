@@ -1,6 +1,7 @@
 import { EventEmitter } from 'node:events';
 
 const wrappedObjects = new WeakMap();
+const pendingCaptures = new WeakMap();
 
 export class GodotValue {
   constructor(native) {
@@ -129,19 +130,19 @@ export class RemoteObject {
   }
 
   async inspect() {
-    return (await this.client.builtin('Object')).inspect({ target: this });
+    return (await this.client.root('Object')).inspect({ target: this });
   }
 
   async get(property) {
-    return (await this.client.builtin('Object')).get({ target: this, property });
+    return (await this.client.root('Object')).get({ target: this, property });
   }
 
   async set(property, value) {
-    return (await this.client.builtin('Object')).set({ target: this, property, value });
+    return (await this.client.root('Object')).set({ target: this, property, value });
   }
 
   async call(method, ...args) {
-    return (await this.client.builtin('Object')).call({ target: this, method, args });
+    return (await this.client.root('Object')).call({ target: this, method, args });
   }
 }
 
@@ -249,7 +250,16 @@ export class InputObject extends RemoteObject {
 }
 
 export class ScreenObject extends RemoteObject {
-  async capture(params = {}) {
+  capture(params = {}) {
+    // The server retains one large capture per connection while we read its chunks.
+    const previous = pendingCaptures.get(this.client) ?? Promise.resolve();
+    const capture = previous.then(() => this.#capture(params));
+    pendingCaptures.set(this.client, capture.then(() => {}, () => {}));
+
+    return capture;
+  }
+
+  async #capture(params) {
     const { base64, byte_length: length, ...info } = await this.invoke('capture', params);
     if (base64 !== undefined) {
       return { ...info, image: Buffer.from(base64, 'base64') };
@@ -312,7 +322,7 @@ export class StagehandClient extends EventEmitter {
   #pending = new Map();
   #nextId = 0;
   #subscriptions = new Map();
-  #builtins = new Map();
+  #rootHandles = new Map();
   #types = new Map();
 
   constructor(socket, { wrappers = {} } = {}) {
@@ -353,8 +363,8 @@ export class StagehandClient extends EventEmitter {
 
           if (item.method === 'objects.removed') {
             this.#types.delete(item.params.object);
-            for (const [label, id] of this.#builtins)
-              if (id === item.params.object) this.#builtins.delete(label);
+            for (const [label, id] of this.#rootHandles)
+              if (id === item.params.object) this.#rootHandles.delete(label);
             for (const [id, subscription] of this.#subscriptions)
               if (subscription.object === item.params.object) this.#subscriptions.delete(id);
           }
@@ -372,7 +382,7 @@ export class StagehandClient extends EventEmitter {
       }
       this.#pending.clear();
       this.#subscriptions.clear();
-      this.#builtins.clear();
+      this.#rootHandles.clear();
       this.#types.clear();
       this.emit('close');
     });
@@ -506,17 +516,17 @@ export class StagehandClient extends EventEmitter {
     return descriptor ? this.object(descriptor.id) : null;
   }
 
-  async builtin(label) {
-    if (!this.#builtins.has(label)) {
+  async root(label) {
+    if (!this.#rootHandles.has(label)) {
       const descriptor = await this.#findDescriptor(label);
       if (!descriptor) {
-        throw new Error(`Builtin is unavailable: ${label}`);
+        throw new Error(`Root is unavailable: ${label}`);
       }
 
-      this.#builtins.set(label, descriptor.id);
+      this.#rootHandles.set(label, descriptor.id);
     }
 
-    return this.object(this.#builtins.get(label));
+    return this.object(this.#rootHandles.get(label));
   }
 
   async subscribe(object, event, listener) {

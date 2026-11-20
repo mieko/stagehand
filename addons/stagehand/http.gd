@@ -9,17 +9,28 @@ const WEBSOCKET_ACCEPT_SUFFIX := "258EAFA5-E914-47DA-95CA-C5AB0DC85B11"
 
 static var _field_name := RegEx.create_from_string("^[!#$%&'*+.^_`|~0-9A-Za-z-]+$")
 static var _websocket_key := RegEx.create_from_string("^[A-Za-z0-9+/]{21}[AQgw]==$")
+static var _port := RegEx.create_from_string("^[0-9]{1,5}$")
 
 var _routes: Dictionary
 var _allowed_hosts := PackedStringArray()
 
 
-func _init(assets: Dictionary, port: int, bind_address: String, app_name: String) -> void:
+func _init(
+	assets: Dictionary,
+	bind_address: String,
+	app_name: String,
+	token_required: bool,
+) -> void:
 	_routes = assets.duplicate()
-	_routes["/"] = { "mime": MARKDOWN_MIME, "bytes": _discovery(app_name, assets).to_utf8_buffer() }
+	_routes["/"] = {
+		"mime": MARKDOWN_MIME,
+		"bytes": _discovery(app_name, assets, token_required).to_utf8_buffer(),
+	}
 
 	if bind_address in ["localhost", "::1"] or bind_address.begins_with("127."):
-		_allowed_hosts = _loopback_hosts(bind_address, port)
+		_allowed_hosts = PackedStringArray(["localhost", "127.0.0.1", "[::1]"])
+		if bind_address.begins_with("127.") and bind_address != "127.0.0.1":
+			_allowed_hosts.append(bind_address)
 
 
 func respond(head: PackedByteArray) -> Dictionary:
@@ -37,7 +48,7 @@ func respond(head: PackedByteArray) -> Dictionary:
 	if host.is_empty():
 		return _response("400 Bad Request")
 
-	if not _allowed_hosts.is_empty() and host.to_lower() not in _allowed_hosts:
+	if not _allowed_hosts.is_empty() and not _allows_host(host.to_lower()):
 		return _response("403 Forbidden")
 
 	if headers.has("transfer-encoding") or headers.get("content-length", "0") != "0":
@@ -73,7 +84,7 @@ func respond(head: PackedByteArray) -> Dictionary:
 	return _response("404 Not Found")
 
 
-static func _discovery(app_name: String, assets: Dictionary) -> String:
+static func _discovery(app_name: String, assets: Dictionary, token_required: bool) -> String:
 	var display_name := app_name.strip_edges().xml_escape()
 	var subject := "this game" if display_name.is_empty() else display_name
 
@@ -94,7 +105,13 @@ static func _discovery(app_name: String, assets: Dictionary) -> String:
 		markdown += "\n"
 
 	markdown += "Stagehand clients connect using this server’s HTTP or HTTPS base address. "
-	markdown += "RPC communication\nuses WebSocket at `/rpc`.\n"
+	markdown += "RPC communication\nuses WebSocket at `/rpc`. "
+	markdown += (
+		"Ask the game operator for the access token."
+		if token_required
+		else "This listener does not require an access token."
+	)
+	markdown += "\n"
 
 	return markdown
 
@@ -125,16 +142,16 @@ static func _headers(lines: PackedStringArray) -> Dictionary:
 	return headers
 
 
-static func _loopback_hosts(bind_address: String, port: int) -> PackedStringArray:
-	var hosts := PackedStringArray(["localhost", "127.0.0.1", "[::1]"])
-	if bind_address.begins_with("127.") and bind_address != "127.0.0.1":
-		hosts.append(bind_address)
+func _allows_host(authority: String) -> bool:
+	if authority in _allowed_hosts:
+		return true
 
-	var explicit_port := PackedStringArray()
-	for host: String in hosts:
-		explicit_port.append("%s:%d" % [host, port])
+	var separator := authority.rfind(":")
+	if separator < 0 or authority.left(separator) not in _allowed_hosts:
+		return false
 
-	return hosts + explicit_port if port == 80 else explicit_port
+	var port := authority.substr(separator + 1)
+	return _port.search(port) != null and port.to_int() > 0 and port.to_int() <= 65535
 
 
 static func _upgrade(headers: Dictionary) -> Dictionary:

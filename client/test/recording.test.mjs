@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import { test } from 'node:test';
-import { connect } from '../client.mjs';
+import { connect } from '../../addons/stagehand/client.mjs';
 import { launchFixture } from './fixture.mjs';
 
 async function recording(t, {
@@ -13,8 +13,8 @@ async function recording(t, {
     await fixture.stop();
   });
 
-  const recorder = await game.builtin('PropertyRecorder');
-  const {scene} = await (await game.builtin('SceneTree')).current();
+  const recorder = await game.root('PropertyRecorder');
+  const {scene} = await (await game.root('SceneTree')).current();
 
   const reconnect = async () => {
     game.close();
@@ -28,7 +28,7 @@ async function recording(t, {
 
 test('native recorder checks cover snapshots, boundaries, bounds and real animation reads', async t => {
   const {game, fixture, scene} = await recording(t);
-  const script = await game.builtin('Script');
+  const script = await game.root('Script');
   if (process.env.STAGEHAND_REQUIRE_NON_DOTNET === '1') {
     const features = await script.evaluate({source: `extends RefCounted
 
@@ -67,7 +67,7 @@ test('recorder retains aligned native pages after disconnect without a consumer 
     phase: 'signal', source: scene, signal: 'measured', every_n: 2, max_samples: 70,
   });
   await scene.call('emit_samples', 140);
-  const retained = await (await reconnect()).builtin('PropertyRecorder');
+  const retained = await (await reconnect()).root('PropertyRecorder');
   const first = await retained.read();
   const next = await retained.read({offset: first.next_offset});
 
@@ -168,7 +168,7 @@ func evaluate(bindings: Dictionary) -> int:
 
 test('script readings at skeleton completion observe modified poses in their chosen space', async t => {
   const {game, recorder, scene} = await recording(t);
-  const script = await game.builtin('Script');
+  const script = await game.root('Script');
   const skeleton = await script.evaluate({source: `extends RefCounted
 
 func evaluate(bindings: Dictionary) -> Skeleton3D:
@@ -328,7 +328,7 @@ test('native admission observes a getter removing its own property', async t => 
 
 test('inspection and failed admission release native readers before the next capture', async t => {
   const {game, recorder, scene} = await recording(t);
-  const script = await game.builtin('Script');
+  const script = await game.root('Script');
   const connections = () => script.evaluate({source: `extends RefCounted
 
 func evaluate(bindings: Dictionary) -> int:
@@ -366,7 +366,7 @@ func evaluate(bindings: Dictionary) -> int:
 
 test('script bindings own freed-object handling instead of a blanket liveness gate', async t => {
   const {game, recorder, scene} = await recording(t);
-  const script = await game.builtin('Script');
+  const script = await game.root('Script');
   const target = await script.evaluate({source: `extends RefCounted
 
 func evaluate(bindings: Dictionary) -> Node:
@@ -398,7 +398,7 @@ func evaluate(bindings: Dictionary) -> bool:
 
 test('admission rejects a native track freed by a later reading before connecting watchers', async t => {
   const {game, recorder, scene} = await recording(t);
-  const script = await game.builtin('Script');
+  const script = await game.root('Script');
   const target = await script.evaluate({source: `extends RefCounted
 
 func evaluate(bindings: Dictionary) -> Node3D:
@@ -475,7 +475,7 @@ func evaluate(_bindings: Dictionary) -> int:
   });
   await scene.call('emit_signal', 'measured');
 
-  const stopped = await (await game.builtin('Script')).evaluate({source: `extends RefCounted
+  const stopped = await (await game.root('Script')).evaluate({source: `extends RefCounted
 
 func evaluate(bindings: Dictionary) -> Dictionary:
     var recorder: Node = bindings.recorder

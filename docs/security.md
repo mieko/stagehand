@@ -81,12 +81,11 @@ operations and events. Handles are identifiers, not passwords.
 The listener defaults to `127.0.0.1`. An explicit `"localhost"` binding serves both
 available loopback families on the same port. Binding `"*"`, `"0.0.0.0"`, `"::"` or another
 interface can let other machines connect. Use a private, unpredictable token for
-private access. Starting with an empty token disables authentication for every
-client; it is an explicit choice by the game. Publishing a fixed token lets anyone who knows it use the API
-you enabled.
+private access. Use `start_local()` to explicitly allow tokenless RPC on loopback.
+Publishing a fixed token lets anyone who knows it use the API you enabled.
 
 Stagehand rejects WebSocket requests that carry a browser `Origin`. Loopback
-bindings check the HTTP `Host` against the loopback addresses and listening port.
+bindings require a loopback HTTP `Host`.
 Local processes that can reach the listener can still attempt RPC connections.
 Keep private tokens out of webpages, logs and source control.
 
@@ -96,7 +95,7 @@ RPC authentication applies to the WebSocket session.
 
 Stagehand serves plain HTTP and WebSocket. Tokens and game traffic are
 unencrypted. For remote access, use a trusted network, an encrypted tunnel,
-or a TLS proxy with an HTTPS base address.
+or a TLS proxy. See [remote setup](../addons/stagehand/README.md#remote-connections).
 
 ## Timeouts do not stop code
 

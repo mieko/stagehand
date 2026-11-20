@@ -9,6 +9,7 @@ still activate the app and take keyboard focus on macOS.
 
 Tests import the client from the checkout. A focused transport check downloads
 the served module and connects with it to verify distribution.
+Set `STAGEHAND_ESBUILD=/path/to/esbuild` to also test a bundled game client.
 
 ## Run the checks
 
@@ -47,7 +48,7 @@ suite uses temporary projects; do not point tests at an active game's state.
 
 The fixtures run without an attached editor debugger. When using Stagehand from
 an editor, invalid dynamic source can pause it under normal break-on-error behavior.
-See [runtime GDScript](protocol.md#runtime-gdscript) for execution limits.
+See [runtime GDScript](../addons/stagehand/api.md#runtime-gdscript) for execution limits.
 
 Use `node --check` for edited JavaScript. Use [GDQuest’s GDScript Formatter](https://github.com/GDQuest/GDScript-formatter)
 for GDScript formatting and linting (`gdscript-formatter --verify-structure` and
@@ -63,7 +64,7 @@ fixture and export checks against the engine and matching template you ship.
 
 Release builds may omit native argument metadata. Screenshots require a rendered
 viewport, and image readback/PNG encoding can block the main thread. Injected mouse
-events do not move the OS cursor. See [the protocol](protocol.md) for these contracts.
+events do not move the OS cursor. See [the protocol](../addons/stagehand/api.md) for these contracts.
 
 Graphical/export checks have focused on macOS arm64. Captured-mouse gameplay,
 DPI/scaled windows and non-macOS exports need further qualification. Secondary-window

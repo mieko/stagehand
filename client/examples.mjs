@@ -1,12 +1,12 @@
 // Run in a persistent JS session or as an ordinary external bot:
 // STAGEHAND_URL=http://127.0.0.1:PORT STAGEHAND_TOKEN=... node examples.mjs
 // Abbreviated outputs below show the standalone fixture; other games differ.
-import { connect, GodotValue } from './client.mjs';
+import { connect, GodotValue } from '../addons/stagehand/client.mjs';
 
 const game = await connect(process.env.STAGEHAND_URL, { token: process.env.STAGEHAND_TOKEN });
 
 try {
-  const input = await game.builtin('Input');
+  const input = await game.root('Input');
   const actions = await input.actions();
   console.log(
     'Available actions:',
@@ -14,7 +14,7 @@ try {
   );
   // => Available actions: [ …, 'move_forward', 'jump' ]
 
-  const tree = await game.builtin('SceneTree');
+  const tree = await game.root('SceneTree');
   const scene = (await tree.current()).scene;
   console.log('Scene:', await scene.get('name'));
   // => Scene: Fixture

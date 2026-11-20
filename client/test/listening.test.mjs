@@ -1,7 +1,7 @@
 import { test } from "node:test";
 import assert from "node:assert/strict";
 import { launchFixture } from "./fixture.mjs";
-import { connect } from "../client.mjs";
+import { connect } from "../../addons/stagehand/client.mjs";
 
 test("localhost serves IPv4 and IPv6 on one port and one registered instance", async (t) => {
   const fixture = await launchFixture({ bindAddress: "localhost", builtins: null });
@@ -16,7 +16,7 @@ test("localhost serves IPv4 and IPv6 on one port and one registered instance", a
   assert.deepEqual(await ipv4.objects(), await ipv6.objects());
 });
 
-test("explicit empty-token mode accepts a client without credentials", async (t) => {
+test("explicit local startup accepts a client without credentials or published assets", async (t) => {
   const fixture = await launchFixture({ token: "", builtins: null });
   t.after(() => fixture.stop());
   const client = await connect(fixture.url);
@@ -26,6 +26,7 @@ test("explicit empty-token mode accepts a client without credentials", async (t)
   const page = await discovery.text();
   assert.match(page, /^# Stagehand\n/);
   assert.match(page, /inspect and control this game through a JavaScript API\./);
+  assert.match(page, /does not require an access token/);
   assert.doesNotMatch(page, /client\.mjs|api\.md|game\.md/);
   assert.equal((await fetch(new URL("/client.mjs", fixture.url))).status, 404);
   assert.equal((await fetch(new URL("/api.md", fixture.url))).status, 404);

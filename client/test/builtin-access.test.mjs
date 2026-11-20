@@ -1,6 +1,6 @@
 import { test } from 'node:test';
 import assert from 'node:assert/strict';
-import { connect } from '../client.mjs';
+import { connect } from '../../addons/stagehand/client.mjs';
 import { launchFixture } from './fixture.mjs';
 
 test('default builtin installation includes Script and conditional Input', async () => {
@@ -8,8 +8,8 @@ test('default builtin installation includes Script and conditional Input', async
   const game = await connect(fixture.url, { token: fixture.token });
 
   try {
-    const script = await game.builtin('Script');
-    const input = await game.builtin('Input');
+    const script = await game.root('Script');
+    const input = await game.root('Input');
     const source = `extends RefCounted
 
 func evaluate(_bindings: Dictionary) -> int:
@@ -29,8 +29,8 @@ test('tree queries page through native matches and runtime metadata identifies t
   const game = await connect(fixture.url, { token: fixture.token });
 
   try {
-    const tree = await game.builtin('SceneTree');
-    const runtime = await game.builtin('Runtime');
+    const tree = await game.root('SceneTree');
+    const runtime = await game.root('Runtime');
     const { scene } = await tree.current();
     const all = await tree.query({ root: scene, class: 'Node', limit: 1000 });
     const first = await tree.query({ root: scene, class: 'Node', limit: 2 });
@@ -66,7 +66,7 @@ test('facade-only configuration refuses undeclared signals through raw RPC', asy
   const game = await connect(fixture.url, { token: fixture.token });
 
   try {
-    const registry = await game.builtin('Registry');
+    const registry = await game.root('Registry');
     const b = await game.findObject('B');
 
     for (const [object, event] of [[registry, 'connection_closed'], [b, 'native_changed']]) {
@@ -130,7 +130,7 @@ test('Object enables arbitrary native signals on unlisted references', async () 
   let stop;
 
   try {
-    const registry = await game.builtin('Registry');
+    const registry = await game.root('Registry');
     const tree = await registry.call('get_tree');
     const frames = [];
     let resolve;

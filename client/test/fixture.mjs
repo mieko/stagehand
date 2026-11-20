@@ -11,7 +11,8 @@ const repo = fileURLToPath(new URL('../../', import.meta.url));
 const godot = process.env.STAGEHAND_GODOT ?? 'godot';
 
 export async function launchFixture({
-  builtins, fixture = 'fixture', bindAddress, expectedErrors = [], strictDeclarations,
+  builtins, fixture = 'fixture', bindAddress, bundleClient = false, expectedErrors = [],
+  strictDeclarations,
   token = randomBytes(24).toString('hex'),
 } = {}) {
   const directory = await mkdtemp(join(tmpdir(), 'stagehand-test-'));
@@ -46,10 +47,14 @@ export async function launchFixture({
 
     await cp(join(repo, 'tests/fixture/export_presets.cfg'), join(directory, 'export_presets.cfg'));
 
-    if (fixture === 'transport') {
-      const served = join(directory, 'served');
-      await cp(join(repo, 'client/client.mjs'), join(served, 'client.mjs'));
-      await cp(join(repo, 'docs/protocol.md'), join(served, 'api.md'));
+    if (bundleClient) {
+      const build = spawnSync(process.env.STAGEHAND_ESBUILD, [
+        'game-client.mjs', '--bundle', '--platform=node', '--format=esm',
+        '--outfile=served/client.mjs',
+      ], { cwd: directory, encoding: 'utf8' });
+      assert.ifError(build.error);
+      assert.equal(build.status, 0, build.stderr);
+      await writeFile(join(directory, 'served/api.md'), '# Packaged Stagehand API\n');
     }
 
     const project = join(directory, 'project.godot');

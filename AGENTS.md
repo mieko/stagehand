@@ -1,6 +1,6 @@
 # Agent directions
 
-Read README.md, docs/protocol.md and docs/development.md before changing contracts.
+Read README.md, addons/stagehand/api.md and docs/development.md before changing contracts.
 This repository owns the reusable pure-GDScript addon, generic external JS client
 and standalone fixtures. Keep game-specific behavior and dependencies in consumers.
 Preserve explicit runtime enablement; do not add an editor-plugin dependency.

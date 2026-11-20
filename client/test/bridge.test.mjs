@@ -5,7 +5,7 @@ import { spawnSync } from 'node:child_process';
 import { fileURLToPath } from 'node:url';
 import { networkInterfaces } from 'node:os';
 import { launchFixture } from './fixture.mjs';
-import { connect, RpcError, GodotValue } from '../client.mjs';
+import { connect, RpcError, GodotValue } from '../../addons/stagehand/client.mjs';
 
 let fixture, client, url, token, objects;
 const graphical = process.env.STAGEHAND_GRAPHICAL === '1';
@@ -50,7 +50,7 @@ test('handshake describes the live instance and discovers registered objects', a
 });
 
 test('core roots advertise their API versions', async () => {
-  const registry = await client.builtin('Registry');
+  const registry = await client.root('Registry');
   const roots = await registry.invoke('list');
   const versions = {
     Registry: '1.0.0',
@@ -67,14 +67,14 @@ test('core roots advertise their API versions', async () => {
     assert.equal(roots.find((object) => object.label === label).version, version);
     assert.equal(client.session.objects.find((object) => object.label === label).version, version);
 
-    const root = await client.builtin(label);
+    const root = await client.root(label);
 
     assert.equal((await root.describe()).version, version);
   }
 });
 
 test('Registry lists current roots through ordinary object operations', async () => {
-  const registry = await client.builtin('Registry');
+  const registry = await client.root('Registry');
   const descriptor = await registry.describe();
 
   assert.equal(descriptor.kind, 'Registry');
@@ -97,7 +97,7 @@ test('Registry remains available with optional builtins disabled', async () => {
   const connection = await connect(isolated.url, { token: isolated.token });
 
   try {
-    const registry = await connection.builtin('Registry');
+    const registry = await connection.root('Registry');
     const roots = await registry.invoke('list');
 
     assert.deepEqual(roots.map((object) => object.label), ['Registry', 'A', 'B']);
@@ -113,7 +113,7 @@ test('Registry remains available with optional builtins disabled', async () => {
 });
 
 test('Registry reports optional game versions and follows live root lifetimes', async () => {
-  const registry = await client.builtin('Registry');
+  const registry = await client.root('Registry');
   const added = new Promise((resolve) => {
     const listener = (item) => {
       if (item.method === 'objects.added' && item.params.label === 'C') {
@@ -314,7 +314,7 @@ test('a fresh connection observes current state without replaying mutations', as
 });
 
 test('scene queries return live object handles with production reflection', async () => {
-  const tree = await client.builtin('SceneTree');
+  const tree = await client.root('SceneTree');
   const current = await tree.invoke('current');
 
   assert.equal(await current.scene.get('name'), 'Fixture');
@@ -344,7 +344,7 @@ test('scene queries return live object handles with production reflection', asyn
 });
 
 test('viewport dimensions use native vectors; headless capture is explicitly unavailable', async () => {
-  const screen = await client.builtin('Screen');
+  const screen = await client.root('Screen');
   const viewports = await screen.invoke('viewports');
   const viewport = viewports.find((entry) => entry.path.endsWith('/TestViewport')).viewport;
   const dimensions = await screen.invoke('dimensions', { viewport });
@@ -492,11 +492,11 @@ test('Variant values preserve precision, native values, dictionaries, and live r
 });
 
 async function fixtureScene() {
-  return (await (await client.builtin('SceneTree')).invoke('current')).scene;
+  return (await (await client.root('SceneTree')).invoke('current')).scene;
 }
 
 test('standalone action press survives its response and a separate release', async () => {
-  const input = await client.builtin('Input'),
+  const input = await client.root('Input'),
     scene = await fixtureScene();
   const actions = await input.invoke('actions');
 
@@ -516,7 +516,7 @@ test('standalone action press survives its response and a separate release', asy
 });
 
 test('local sequence applies exactly the requested hold ticks and reports terminal outcome', async () => {
-  const input = await client.builtin('Input'),
+  const input = await client.root('Input'),
     scene = await fixtureScene();
   const before = await scene.get('input_ticks');
   const action = await input.startSequence({
@@ -538,7 +538,7 @@ test('local sequence applies exactly the requested hold ticks and reports termin
 });
 
 test('sequence boundary order, overlapping actions, and standalone hold ownership', async () => {
-  const input = await client.builtin('Input'),
+  const input = await client.root('Input'),
     scene = await fixtureScene();
   await input.invoke('press', { action: 'jump' });
   await assert.rejects(
@@ -567,7 +567,7 @@ test('sequence boundary order, overlapping actions, and standalone hold ownershi
 });
 
 test('cancellation releases held input; a second writer cannot interleave', async () => {
-  const input = await client.builtin('Input'),
+  const input = await client.root('Input'),
     scene = await fixtureScene();
   const action = await input.startSequence({
     ticks: 300,
@@ -576,7 +576,7 @@ test('cancellation releases held input; a second writer cannot interleave', asyn
   const other = await connect(url, { token });
 
   try {
-    const otherInput = await other.builtin('Input');
+    const otherInput = await other.root('Input');
     await assert.rejects(otherInput.invoke('press', { action: 'jump' }), { code: -32030 });
     await assert.rejects(otherInput.invoke('cancel', { action: action.action }), { code: -32030 });
 
@@ -596,7 +596,7 @@ test('cancellation releases held input; a second writer cannot interleave', asyn
 
 test('disconnect releases standalone holds and cancels a scheduled hold', async () => {
   const other = await connect(url, { token });
-  const input = await other.builtin('Input'),
+  const input = await other.root('Input'),
     scene = await fixtureScene();
   await input.invoke('press', { action: 'jump' });
 
@@ -616,7 +616,7 @@ test('disconnect releases standalone holds and cancels a scheduled hold', async 
 
   assert.equal(await scene.get('forward_held'), false);
 
-  const mainInput = await client.builtin('Input');
+  const mainInput = await client.root('Input');
 
   assert.equal(
     (await mainInput.invoke('status', { action: action.action })).reason,
@@ -629,7 +629,7 @@ test('disconnect releases standalone holds and cancels a scheduled hold', async 
 test('wall budget and cleanup remain responsive while the scene is paused', async () => {
   const scene = await fixtureScene(),
     tree = await scene.call('get_tree');
-  const input = await client.builtin('Input');
+  const input = await client.root('Input');
   await tree.set('paused', true);
 
   try {
@@ -649,7 +649,7 @@ test('wall budget and cleanup remain responsive while the scene is paused', asyn
 });
 
 test('synthetic motion reaches actual input consumers with screen-relative fields', async () => {
-  const input = await client.builtin('Input'),
+  const input = await client.root('Input'),
     scene = await fixtureScene();
   const relative = new GodotValue({ type: 'Vector2', args: [12, -3] });
   const position = new GodotValue({ type: 'Vector2', args: [73, 81] });
@@ -675,7 +675,7 @@ test('synthetic motion reaches actual input consumers with screen-relative field
 });
 
 test('mouse buttons reach GUI input and release polled button state', async () => {
-  const input = await client.builtin('Input'),
+  const input = await client.root('Input'),
     scene = await fixtureScene();
   const before = await scene.get('clicks');
   await input.invoke('press', {
@@ -692,7 +692,7 @@ test('mouse buttons reach GUI input and release polled button state', async () =
 
 for (const operation of ['move_mouse', 'scroll']) {
   test(`${operation} exposes its cursor before reentrant button release`, async () => {
-    const input = await client.builtin('Input');
+    const input = await client.root('Input');
     const scene = await fixtureScene();
     const origin = new GodotValue({type: 'Vector2', args: [20, 20]});
     const position = new GodotValue({type: 'Vector2', args: [160, 160]});
@@ -715,10 +715,10 @@ for (const operation of ['move_mouse', 'scroll']) {
 }
 
 test('scroll pulses reach a native ScrollContainer, preserve holds and obey Input ownership', async () => {
-  const input = await client.builtin('Input'),
+  const input = await client.root('Input'),
     scene = await fixtureScene();
   const scroll = (
-    await (await client.builtin('SceneTree')).invoke('query', { name: 'ScrollTarget' })
+    await (await client.root('SceneTree')).invoke('query', { name: 'ScrollTarget' })
   ).nodes[0].node;
   const position = new GodotValue({ type: 'Vector2', args: [280, 120] });
   await scroll.set('scroll_vertical', 0);
@@ -728,7 +728,7 @@ test('scroll pulses reach a native ScrollContainer, preserve holds and obey Inpu
 
   try {
     await assert.rejects(
-      (await other.builtin('Input')).invoke('scroll', { vertical: 1, position }),
+      (await other.root('Input')).invoke('scroll', { vertical: 1, position }),
       { code: -32030 },
     );
 
@@ -770,7 +770,7 @@ test('scroll pulses reach a native ScrollContainer, preserve holds and obey Inpu
 });
 
 test('one mouse-move request interpolates locally over wall time and completes at its destination', async () => {
-  const input = await client.builtin('Input'),
+  const input = await client.root('Input'),
     scene = await fixtureScene();
   await scene.set('motion_samples', []);
 
@@ -812,7 +812,7 @@ test('one mouse-move request interpolates locally over wall time and completes a
 });
 
 test('mouse movement shares ownership and cancellation; paused UI movement still runs', async () => {
-  const input = await client.builtin('Input'),
+  const input = await client.root('Input'),
     scene = await fixtureScene();
   const tree = await scene.call('get_tree');
   const position = new GodotValue({ type: 'Vector2', args: [30, 25] });
@@ -846,7 +846,7 @@ test(
   'release capture contains the visible effect of real input',
   { skip: !graphical },
   async () => {
-    const screen = await client.builtin('Screen');
+    const screen = await client.root('Screen');
     const viewport = (await screen.invoke('viewports')).find((entry) =>
       entry.path.endsWith('/TestViewport'),
     ).viewport;
@@ -866,7 +866,7 @@ test(
 test('a native capture larger than one RPC message returns the full PNG', {
   skip: !graphical, timeout: 30_000,
 }, async () => {
-  const screen = await client.builtin('Screen');
+  const screen = await client.root('Screen');
   const viewport = await client.object(objects[0].id).invoke('noisy_viewport');
   try {
     const capture = await screen.capture({ viewport });
@@ -932,7 +932,7 @@ test(
     const connection = await connect(isolated.url, { token: isolated.token });
 
     try {
-      await assert.rejects(connection.builtin('Screen'), /unavailable/);
+      await assert.rejects(connection.root('Screen'), /unavailable/);
 
       const probe = connection.object(
         (await connection.objects()).find((object) => object.label === 'A').id,
@@ -940,7 +940,7 @@ test(
 
       assert.equal(await probe.invoke('increment'), 1);
 
-      const input = await connection.builtin('Input');
+      const input = await connection.root('Input');
       const action = await input.startSequence({
         ticks: 300,
         events: [{ at_tick: 0, pressed: true, input: { action: 'move_forward' } }],
@@ -948,7 +948,7 @@ test(
       await input.call('queue_free');
       await assert.rejects(action.finished, /endpoint was removed/);
 
-      const scene = (await (await connection.builtin('SceneTree')).invoke('current')).scene;
+      const scene = (await (await connection.root('SceneTree')).invoke('current')).scene;
       await new Promise((resolve) => setTimeout(resolve, 30));
 
       assert.equal(await scene.get('forward_held'), false);
@@ -997,7 +997,7 @@ test('the standalone JS example observes, executes locally, and checks fixture m
 });
 
 test('removing the bridge cleans held inputs and ordinary fixture physics continues', async () => {
-  const input = await client.builtin('Input');
+  const input = await client.root('Input');
   await input.invoke('press', { action: 'move_forward' });
 
   const closed = once(client, 'close');

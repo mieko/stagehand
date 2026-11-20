@@ -6,7 +6,7 @@ import { tmpdir } from 'node:os';
 import { join } from 'node:path';
 import { test } from 'node:test';
 import { pathToFileURL } from 'node:url';
-import { connect } from '../client.mjs';
+import { connect } from '../../addons/stagehand/client.mjs';
 import { launchFixture } from './fixture.mjs';
 
 test('the client derives the RPC address from the HTTP or HTTPS base', async () => {
@@ -36,27 +36,19 @@ test('a running game serves its client and separate API references', async (t) =
   const discovery = await fetch(base);
   assert.equal(discovery.status, 200);
   assert.match(discovery.headers.get('content-type'), /^text\/markdown/);
-  const expectedDiscovery = [
-    '# Stagehand',
-    '',
-    'Stagehand lets external tools inspect and control Greeter Demo through a JavaScript API.',
-    '',
-    'This server provides the client and documentation matching the installed integration:',
-    '',
-    '- [JavaScript client](./client.mjs)',
-    '- [Stagehand API](./api.md)',
-    '- [Greeter Demo API](./game.md)',
-    '',
-    'Stagehand clients connect using this server’s HTTP or HTTPS base address. RPC communication',
-    'uses WebSocket at `/rpc`.',
-    '',
-  ].join('\n');
-  assert.equal(await discovery.text(), expectedDiscovery);
+  const index = await discovery.text();
+  assert.match(index, /^# Stagehand\n/);
+  assert.match(index, /inspect and control Greeter Demo/);
+  assert.match(index, /access token/);
+  assert.deepEqual(
+    [...index.matchAll(/\]\(\.\/([^)]*)\)/g)].map((link) => link[1]),
+    ['client.mjs', 'api.md', 'game.md'],
+  );
 
   const reference = await fetch(base + '/api.md');
   assert.equal(reference.status, 200);
   assert.match(reference.headers.get('content-type'), /^text\/markdown/);
-  const protocol = new URL('../../docs/protocol.md', import.meta.url);
+  const protocol = new URL('../../addons/stagehand/api.md', import.meta.url);
   assert.equal(await reference.text(), await readFile(protocol, 'utf8'));
 
   const gameReference = await fetch(base + '/game.md');
@@ -74,7 +66,7 @@ test('a running game serves its client and separate API references', async (t) =
   const { connect: connectDownloaded } = await import(pathToFileURL(path));
   const client = await connectDownloaded(base, { token: fixture.token });
   t.after(() => client.close());
-  const game = await client.builtin('Fixture');
+  const game = await client.root('Fixture');
   const message = 'from the matching client';
   assert.equal(await game.invoke('echo', { value: message }), message);
 
@@ -86,6 +78,31 @@ test('a running game serves its client and separate API references', async (t) =
   assert.equal(await head.text(), '');
   const large = await fetch(base + '/api.md', { headers: { 'X-Test': 'a'.repeat(8192) } });
   assert.equal(large.status, 431);
+});
+
+test('a published game bundle preserves core exports and adds named game calls', {
+  skip: !process.env.STAGEHAND_ESBUILD && 'Set STAGEHAND_ESBUILD to qualify a game bundle',
+}, async (t) => {
+  const fixture = await launchFixture({ fixture: 'transport', bundleClient: true });
+  t.after(fixture.stop);
+  const reference = await fetch(fixture.url + '/api.md');
+  assert.equal(await reference.text(), '# Packaged Stagehand API\n');
+
+  const directory = await mkdtemp(join(tmpdir(), 'stagehand-bundle-'));
+  t.after(() => rm(directory, { recursive: true, force: true }));
+
+  const response = await fetch(fixture.url + '/client.mjs');
+  assert.equal(response.status, 200);
+  const path = join(directory, 'client.mjs');
+  await writeFile(path, Buffer.from(await response.arrayBuffer()));
+
+  const bundled = await import(pathToFileURL(path));
+  const core = await import('../../addons/stagehand/client.mjs');
+  assert.deepEqual(Object.keys(bundled), Object.keys(core));
+
+  const client = await bundled.connect(fixture.url, { token: fixture.token });
+  t.after(() => client.close());
+  assert.equal(await (await client.root('Fixture')).echo({ value: 'bundled' }), 'bundled');
 });
 
 test('loopback rejects foreign Host and browser Origin independently of token setup', async (t) => {
@@ -104,9 +121,16 @@ test('loopback rejects foreign Host and browser Origin independently of token se
   assert.equal((await upgrade(base, { 'Sec-WebSocket-Version': '12' })).status, 426);
   assert.equal((await upgrade(base, { 'Sec-WebSocket-Key': 'not-a-nonce' })).status, 400);
 
+  const forwardedPort = new URL(base).port === '49153' ? 49154 : 49153;
+  const forwardedHost = { Host: `127.0.0.1:${forwardedPort}` };
+  assert.equal(await httpStatus(base + '/api.md', forwardedHost), 200);
+  const forwarded = await upgrade(base, forwardedHost);
+  assert.equal(forwarded.status, 101);
+  forwarded.socket.destroy();
+
   const client = await connect(fixture.url);
   t.after(() => client.close());
-  assert.equal(await (await client.builtin('Fixture')).invoke('echo', { value: true }), true);
+  assert.equal(await (await client.root('Fixture')).invoke('echo', { value: true }), true);
 });
 
 test('standard extended lengths and fragmented replies work with the default client', async (t) => {
@@ -114,7 +138,7 @@ test('standard extended lengths and fragmented replies work with the default cli
   t.after(fixture.stop);
   const client = await connect(fixture.url, { token: fixture.token });
   t.after(() => client.close());
-  const game = await client.builtin('Fixture');
+  const game = await client.root('Fixture');
 
   for (const size of [256, 256 * 1024, 2 * 1024 * 1024]) {
     const value = 'x'.repeat(size);
@@ -150,6 +174,29 @@ test('fragmented UTF-8 text survives split TCP writes and an interleaved ping', 
   const [close] = await readFrames(socket, 1);
   assert.equal(close.opcode, 8);
   assert.equal(close.body.readUInt16BE(), 1000);
+});
+
+test('an authenticated message can take over five seconds while bytes keep arriving', async (t) => {
+  const fixture = await launchFixture({ fixture: 'transport', token: '' });
+  t.after(fixture.stop);
+  const { status, socket } = await upgrade(fixture.url);
+  assert.equal(status, 101);
+  t.after(() => socket.destroy());
+
+  socket.write(frame(1, Buffer.from('{"jsonrpc":"2.0","id":1,"method":"session.hello"}')));
+  const [hello] = await readFrames(socket, 1);
+  assert.equal(JSON.parse(hello.body).result.protocol, 1);
+
+  const requestPrefix = Buffer.from('{"jsonrpc":"2.0","id":2,');
+  socket.write(frame(1, requestPrefix, { final: false }));
+  for (let index = 0; index < 5; index += 1) {
+    await delay(1100);
+    socket.write(frame(0, Buffer.from(' '), { final: false }));
+  }
+
+  socket.write(frame(0, Buffer.from('"method":"objects.list"}')));
+  const [reply] = await readFrames(socket, 1);
+  assert.equal(JSON.parse(reply.body).id, 2);
 });
 
 test('invalid frames use standard close codes before reaching the RPC dispatcher', async (t) => {

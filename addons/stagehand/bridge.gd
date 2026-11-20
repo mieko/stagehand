@@ -14,6 +14,8 @@ const WebSocket = preload("websocket.gd")
 const PROTOCOL_VERSION := 1
 const MAX_PEERS := 8
 const AUTH_TIMEOUT_MS := 5000
+const CLIENT_PATH := "res://addons/stagehand/client.mjs"
+const API_PATH := "res://addons/stagehand/api.md"
 
 ## Display name for HTTP discovery. Set before calling start().
 var app_name := ""
@@ -60,6 +62,18 @@ func _init() -> void:
 
 
 func start(token: String, port: int = 0, bind_address: String = "127.0.0.1") -> Error:
+	if token.is_empty():
+		return ERR_INVALID_PARAMETER
+
+	return _start(token, port, bind_address)
+
+
+## Start a loopback listener without a token.
+func start_local(port: int = 0) -> Error:
+	return _start("", port, "localhost")
+
+
+func _start(token: String, port: int, bind_address: String) -> Error:
 	if _server.is_listening():
 		return ERR_INVALID_PARAMETER
 
@@ -68,7 +82,7 @@ func start(token: String, port: int = 0, bind_address: String = "127.0.0.1") -> 
 		return result
 
 	_token = token
-	_http = Http.new(_assets, get_port(), bind_address, app_name)
+	_http = Http.new(_assets, bind_address, app_name, not token.is_empty())
 	set_process(true)
 
 	return OK
@@ -78,8 +92,12 @@ func get_port() -> int:
 	return _server.get_local_port()
 
 
-## Serve the bundled client, Stagehand reference, and optional game reference.
-func serve_client(client_path: String, api_path: String, game_doc_path: String = "") -> Error:
+## Publish the bundled assets. Mod packs can supply their own resource paths.
+func serve_client(
+	game_doc_path: String = "",
+	client_path: String = CLIENT_PATH,
+	api_path: String = API_PATH,
+) -> Error:
 	if _server.is_listening():
 		return ERR_ALREADY_IN_USE
 

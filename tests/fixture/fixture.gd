@@ -251,7 +251,15 @@ func _ready() -> void:
 	var token := OS.get_environment("STAGEHAND_TOKEN")
 	var bind_address := OS.get_environment("STAGEHAND_BIND_ADDRESS")
 	var result: Error
-	if bind_address.is_empty():
+	if token.is_empty():
+		if bridge.start(token) != ERR_INVALID_PARAMETER:
+			push_error("Authenticated startup must reject an empty token")
+			get_tree().quit(1)
+
+			return
+
+		result = bridge.start_local()
+	elif bind_address.is_empty():
 		result = bridge.start(token)
 	else:
 		result = bridge.start(token, 0, bind_address)

@@ -140,13 +140,16 @@ func abort() -> void:
 func _read(now: int) -> void:
 	var limit := Http.MAX_HEADER_BYTES if state == State.HANDSHAKE else IO_PER_POLL
 	var count := mini(_tcp.get_available_bytes(), limit - _rx.size())
+	var received := false
 	if count > 0:
 		var read := _tcp.get_partial_data(count)
 		if read[0] != OK:
 			abort()
 			return
 
-		_rx.append_array(read[1])
+		var bytes: PackedByteArray = read[1]
+		_rx.append_array(bytes)
+		received = not bytes.is_empty()
 
 	if state == State.HANDSHAKE:
 		_handshake()
@@ -160,7 +163,8 @@ func _read(now: int) -> void:
 		_rx = _rx.slice(_read_at)
 		_read_at = 0
 
-	if _read_deadline == 0 and (not _rx.is_empty() or _opcode != -1 or _fragmented):
+	var pending := not _rx.is_empty() or _opcode != -1 or _fragmented
+	if pending and (received or _read_deadline == 0):
 		_read_deadline = now + OPERATIONS_TIMEOUT_MS
 
 

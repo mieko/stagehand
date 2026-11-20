@@ -1,6 +1,8 @@
 import { after, before, test } from 'node:test';
 import assert from 'node:assert/strict';
-import { connect, GodotValue, InputObject, forwardMethods, RemoteObject, ScreenObject } from '../client.mjs';
+import {
+  connect, forwardMethods, GodotValue, InputObject, RemoteObject, ScreenObject,
+} from '../../addons/stagehand/client.mjs';
 import { launchFixture } from './fixture.mjs';
 
 let fixture;
@@ -34,7 +36,7 @@ test('operation wrappers forward calls, results and errors through ordinary remo
   let child;
 
   try {
-    const probe = await game.builtin('A');
+    const probe = await game.root('A');
     assert.ok(probe.remote instanceof RemoteObject);
 
     const returned = await probe.echo({ value: { self: probe, number: 9007199254740993n } });
@@ -79,6 +81,34 @@ test('operation wrappers reject invalid names and names reserved by the facade o
   }
 });
 
+test('large screenshots on one connection finish before the next capture starts', async () => {
+  let current;
+  const client = {
+    async request(_method, { method, params }) {
+      if (method === 'capture') {
+        current = params.viewport;
+        return { capture: current, byte_length: 2 };
+      }
+
+      assert.equal(method, 'capture_chunk');
+      assert.equal(params.capture, current);
+      const bytes = Buffer.from(current);
+      return {
+        base64: bytes.subarray(params.offset, params.offset + 1).toString('base64'),
+        next_offset: params.offset + 1,
+      };
+    },
+  };
+
+  const firstScreen = new ScreenObject(client, 'screen');
+  const secondScreen = new ScreenObject(client, 'screen');
+  const captures = await Promise.all([
+    firstScreen.capture({ viewport: 'ab' }),
+    secondScreen.capture({ viewport: 'cd' }),
+  ]);
+  assert.deepEqual(captures.map(({ image }) => image.toString()), ['ab', 'cd']);
+});
+
 test('standard endpoints use their registered kinds through ordinary discovery and references', async () => {
   const game = await connect(fixture.url, { token: fixture.token });
 
@@ -92,7 +122,7 @@ test('standard endpoints use their registered kinds through ordinary discovery a
     const screen = await game.findObject('Screen');
     assert.ok(input instanceof InputObject);
     assert.ok(screen instanceof ScreenObject);
-    assert.equal(input.id, (await game.builtin('Input')).id);
+    assert.equal(input.id, (await game.root('Input')).id);
 
     const probe = await game.findObject('A');
     const returned = await probe.invoke('echo', { value: { input } });
@@ -107,11 +137,11 @@ test('builtin methods expose the known operations without invoke', async () => {
   const game = await connect(fixture.url, {token: fixture.token});
 
   try {
-    const registry = await game.builtin('Registry');
-    const runtime = await game.builtin('Runtime');
-    const tree = await game.builtin('SceneTree');
-    const objects = await game.builtin('Object');
-    const script = await game.builtin('Script');
+    const registry = await game.root('Registry');
+    const runtime = await game.root('Runtime');
+    const tree = await game.root('SceneTree');
+    const objects = await game.root('Object');
+    const script = await game.root('Script');
 
     assert.ok((await registry.list()).some((root) => root.label === 'Script'));
     assert.equal(typeof (await runtime.info()).physics_ticks_per_second, 'number');
@@ -142,8 +172,8 @@ test('input and screen wrappers include immediate methods as well as scheduled h
   const game = await connect(fixture.url, {token: fixture.token});
 
   try {
-    const input = await game.builtin('Input');
-    const screen = await game.builtin('Screen');
+    const input = await game.root('Input');
+    const screen = await game.root('Screen');
     assert.ok((await input.actions()).actions.some((action) => action.name === 'jump'));
 
     await input.press({action: 'jump'});
@@ -181,7 +211,7 @@ test('consumer factories can extend the standard wrapper and keep its helpers on
   });
 
   try {
-    const input = await game.builtin('Input');
+    const input = await game.root('Input');
     assert.ok(input instanceof InputObject);
     assert.equal((await input.tap({action: 'jump'})).status, 'completed');
     assert.ok((await input.actions()).actions.some((action) => action.name === 'jump'));
@@ -205,7 +235,7 @@ test('required named lookup caches ordinary handles and refreshes after removal 
   const handles = [];
 
   try {
-    const tree = await game.builtin('SceneTree');
+    const tree = await game.root('SceneTree');
     const scene = (await tree.invoke('current')).scene;
     bridge = (await tree.invoke('query', { name: 'Stagehand' })).nodes[0].node;
     handles.push(await bridge.call('register_object', scene, 'Named fixture', 'Dingus'));
@@ -218,21 +248,21 @@ test('required named lookup caches ordinary handles and refreshes after removal 
       return objects();
     };
 
-    const first = await game.builtin('Named fixture');
+    const first = await game.root('Named fixture');
     assert.equal(await first.name(), 'Fixture');
-    assert.equal(await (await game.builtin('Named fixture')).name(), 'Fixture');
+    assert.equal(await (await game.root('Named fixture')).name(), 'Fixture');
     assert.equal(discoveries, 1);
 
     await bridge.call('unregister_object', handles.shift());
-    assert.equal(await (await game.builtin('Named fixture')).name(), 'Stagehand');
+    assert.equal(await (await game.root('Named fixture')).name(), 'Stagehand');
     assert.equal(discoveries, 2);
 
     await bridge.call('unregister_object', handles.shift());
-    await assert.rejects(game.builtin('Named fixture'), /Builtin is unavailable: Named fixture/);
+    await assert.rejects(game.root('Named fixture'), /Root is unavailable: Named fixture/);
     assert.equal(await game.findObject('Named fixture'), null);
 
     handles.push(await bridge.call('register_object', scene, 'Named fixture', 'Dingus'));
-    assert.equal(await (await game.builtin('Named fixture')).name(), 'Fixture');
+    assert.equal(await (await game.root('Named fixture')).name(), 'Fixture');
   } finally {
     for (const handle of handles) await bridge.call('unregister_object', handle);
     game.close();
@@ -281,7 +311,7 @@ test('factory objects wrap discovery, nested results, observations and event arg
     assert.ok(received[1][0] instanceof Dingus);
     assert.equal(received[2], null);
 
-    const scene = (await (await game.builtin('SceneTree')).invoke('current')).scene;
+    const scene = (await (await game.root('SceneTree')).invoke('current')).scene;
     assert.ok(scene instanceof RemoteObject);
     assert.equal(await scene.get('name'), 'Fixture');
   } finally {
@@ -320,7 +350,7 @@ test('first-seen native references carry their wrapper type without discovery', 
   });
 
   try {
-    const tree = await game.builtin('SceneTree');
+    const tree = await game.root('SceneTree');
     const current = await tree.invoke('current');
 
     assert.equal(await current.scene.name(), 'Fixture');
@@ -354,7 +384,7 @@ test('consumer factories can deliberately replace a standard wrapper', async () 
   });
 
   try {
-    const input = await game.builtin('Input');
+    const input = await game.root('Input');
 
     assert.equal((await input.snapshot()).value.active_action, null);
     const probe = await game.findObject('A');
@@ -364,7 +394,7 @@ test('consumer factories can deliberately replace a standard wrapper', async () 
     const defaultClient = await connect(fixture.url, { token: fixture.token });
     try {
       assert.equal(
-        (await (await defaultClient.builtin('Input')).scroll({ vertical: 1 })).delivered,
+        (await (await defaultClient.root('Input')).scroll({ vertical: 1 })).delivered,
         true,
       );
     } finally {
@@ -461,7 +491,7 @@ test('explicit registration supplies the type even after a node was inspected ge
   let bridge, registered;
 
   try {
-    const tree = await game.builtin('SceneTree');
+    const tree = await game.root('SceneTree');
     const scene = (await tree.invoke('current')).scene;
     bridge = (await tree.invoke('query', { name: 'Stagehand' })).nodes[0].node;
     registered = await bridge.call('register_object', scene, 'Scene facade', 'Dingus');
@@ -482,7 +512,7 @@ test('removing a node invalidates all of its registered handles', async () => {
   try {
     const parent = await game.findObject('A');
     child = game.object(await parent.invoke('spawn'));
-    const tree = await game.builtin('SceneTree');
+    const tree = await game.root('SceneTree');
     const bridge = (await tree.invoke('query', { name: 'Stagehand' })).nodes[0].node;
     const alias = game.object(await bridge.call('register_object', child, 'Alias', 'Dingus'));
     await child.invoke('remove');

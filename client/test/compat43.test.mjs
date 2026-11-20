@@ -1,6 +1,6 @@
 import assert from 'node:assert/strict';
 import {test} from 'node:test';
-import {connect} from '../client.mjs';
+import {connect} from '../../addons/stagehand/client.mjs';
 import {launchFixture} from './fixture.mjs';
 
 test('modern bridges leave legacy implementations unloaded', async t => {
@@ -10,7 +10,7 @@ test('modern bridges leave legacy implementations unloaded', async t => {
     game.close();
     await fixture.stop();
   });
-  const loaded = await (await game.builtin('Script')).evaluate({source: `extends RefCounted
+  const loaded = await (await game.root('Script')).evaluate({source: `extends RefCounted
 
 func evaluate(_bindings: Dictionary) -> Dictionary:
     return {
@@ -29,7 +29,7 @@ test('4.3 shims preserve native JSON values and arbitrary signal arity', async t
     game.close();
     await fixture.stop();
   });
-  const script = await game.builtin('Script');
+  const script = await game.root('Script');
   const differences = await script.evaluate({source: `extends RefCounted
 
 func evaluate(_bindings: Dictionary) -> Array:
